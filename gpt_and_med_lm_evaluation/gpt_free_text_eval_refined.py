@@ -1,0 +1,371 @@
+"""
+Open-ended evaluation with Iterative Adversarial Refinement.
+
+This script extends gpt_free_text_eval.py to use the iterative refinement
+pipeline with checklist enforcement.
+
+Outputs:
+- CSV with BERTScore on final_diagnosis (compatible with baseline)
+- JSONL with full refinement traces, CCR metrics, and iterations/minimality
+"""
+
+import pandas as pd
+import bert_score
+import os
+import time
+import random
+import argparse
+import logging
+from pathlib import Path
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+
+from dotenv import load_dotenv
+from openai import OpenAI
+
+# Import refinement module
+from refinement import (
+    IterativeRefiner,
+    RefinementTrace,
+    compute_ccr_metrics,
+    aggregate_minimality_metrics,
+    compute_compliance_rate,
+    compute_clinical_quality_stats,
+    compute_hard_fail_rate,
+)
+from refinement.refiner import RefinerConfig, create_refiner, BatchRefiner
+from refinement.io import JSONLLogger, CSVExporter, save_summary_report, hash_case_text
+from refinement.schema import ChecklistConfig
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Open-ended evaluation with iterative adversarial refinement"
+    )
+    
+    parser.add_argument(
+        "--input",
+        type=str,
+        default="datasets/Case_report_w_images_dis_VF.csv",
+        help="Path to input dataset CSV",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="output/refined",
+        help="Directory for output files",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt-4o",
+        help="Model to use for generation/critique/editing",
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=3,
+        help="Maximum refinement iterations",
+    )
+    parser.add_argument(
+        "--clinical-threshold",
+        type=int,
+        default=3,
+        help="Minimum clinical quality score (0-5)",
+    )
+    parser.add_argument(
+        "--n-batches",
+        type=int,
+        default=4,
+        help="Number of batches to sample",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=250,
+        help="Size of each batch",
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Path to JSONL to resume from (for partial runs)",
+    )
+    
+    return parser.parse_args()
+
+
+def load_dataset(path: str) -> pd.DataFrame:
+    """Load the dataset from CSV."""
+    logger.info(f"Loading dataset from {path}")
+    ds = pd.read_csv(path)
+    logger.info(f"Loaded {len(ds)} cases")
+    return ds
+
+
+def sample_batches(
+    ds: pd.DataFrame,
+    n_batches: int,
+    batch_size: int,
+    random_seed: int,
+) -> List[pd.DataFrame]:
+    """Sample batches from the dataset."""
+    batches = []
+    for batch_num in range(n_batches):
+        batch = ds.sample(n=batch_size, random_state=random_seed + batch_num)
+        batches.append(batch)
+        logger.info(f"Sampled batch {batch_num + 1}/{n_batches} with {len(batch)} cases")
+    return batches
+
+
+def process_single_case(
+    refiner: IterativeRefiner,
+    case_text: str,
+    true_diagnosis: str,
+    case_id: str,
+) -> RefinementTrace:
+    """Process a single case through the refinement pipeline."""
+    trace = refiner.refine(
+        case_text=case_text,
+        case_id=case_id,
+        true_diagnosis=true_diagnosis,
+    )
+    return trace
+
+
+def compute_bertscores(
+    traces: List[RefinementTrace],
+    model_type: str = "microsoft/deberta-xlarge-mnli",
+) -> List[float]:
+    """
+    Compute BERTScore F1 for all traces.
+    
+    Args:
+        traces: List of RefinementTrace objects
+        model_type: BERTScore model to use
+        
+    Returns:
+        List of BERTScore F1 values
+    """
+    predictions = [trace.extracted_final_diagnosis for trace in traces]
+    references = [trace.true_diagnosis for trace in traces]
+    
+    logger.info(f"Computing BERTScore for {len(predictions)} predictions...")
+    
+    P, R, F1 = bert_score.score(
+        predictions,
+        references,
+        lang="en",
+        model_type=model_type,
+    )
+    
+    return F1.tolist()
+
+
+def create_summary_report(
+    traces: List[RefinementTrace],
+    bertscore_f1: List[float],
+    config: RefinerConfig,
+    checklist_config: ChecklistConfig,
+    runtime_seconds: float,
+) -> Dict[str, Any]:
+    """Create a summary report of the evaluation."""
+    import numpy as np
+    
+    # Compute CCR metrics
+    ccr_metrics = compute_ccr_metrics(traces, checklist_config)
+    
+    # Compute minimality metrics
+    minimality_stats = aggregate_minimality_metrics(traces)
+    
+    # Compute clinical quality stats
+    quality_stats = compute_clinical_quality_stats(traces)
+    
+    # Compliance and hard fail rates
+    compliance_rate = compute_compliance_rate(traces)
+    hard_fail_rate = compute_hard_fail_rate(traces)
+    
+    # BERTScore stats
+    bertscore_mean = float(np.mean(bertscore_f1))
+    bertscore_std = float(np.std(bertscore_f1))
+    
+    # Iterations stats
+    iterations_to_compliance = [
+        t.iterations_to_compliance
+        for t in traces
+        if t.iterations_to_compliance is not None
+    ]
+    mean_iterations = (
+        float(np.mean(iterations_to_compliance))
+        if iterations_to_compliance else None
+    )
+    
+    report = {
+        "timestamp": datetime.now().isoformat(),
+        "n_cases": len(traces),
+        "config": config.to_dict(),
+        "metrics": {
+            "bertscore": {
+                "mean": bertscore_mean,
+                "std": bertscore_std,
+            },
+            "ccr": ccr_metrics.to_dict(),
+            "compliance_rate": compliance_rate,
+            "hard_fail_rate": hard_fail_rate,
+            "clinical_quality": quality_stats,
+            "minimality": minimality_stats,
+            "iterations": {
+                "mean_to_compliance": mean_iterations,
+                "n_compliant": len(iterations_to_compliance),
+                "n_non_compliant": len(traces) - len(iterations_to_compliance),
+            },
+        },
+        "runtime_seconds": runtime_seconds,
+    }
+    
+    return report
+
+
+def main():
+    """Main entry point."""
+    args = parse_args()
+    
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Timestamp for this run
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Load dataset
+    ds = load_dataset(args.input)
+    
+    # Configure refiner
+    config = RefinerConfig(
+        generator_model=args.model,
+        critic_model=args.model,
+        editor_model=args.model,
+        max_iterations=args.max_iterations,
+        clinical_quality_threshold=args.clinical_threshold,
+    )
+    
+    # Create refiner
+    refiner = create_refiner(config=config)
+    
+    # Load checklist config for metrics
+    checklist_config = ChecklistConfig.load()
+    
+    # Sample batches
+    batches = sample_batches(
+        ds,
+        n_batches=args.n_batches,
+        batch_size=args.batch_size,
+        random_seed=args.random_seed,
+    )
+    
+    # Process all batches
+    all_traces: List[RefinementTrace] = []
+    start_time = time.time()
+    
+    # JSONL logger for traces
+    jsonl_path = output_dir / f"refinement_traces_{timestamp}.jsonl"
+    
+    with JSONLLogger(jsonl_path) as logger_jsonl:
+        for batch_num, batch in enumerate(batches):
+            logger.info(f"Processing batch {batch_num + 1}/{len(batches)}")
+            
+            for idx, row in batch.iterrows():
+                case_text = row.get("clean text", row.get("case presentation", ""))
+                true_diagnosis = row.get("final diagnosis", "")
+                case_id = f"batch{batch_num}_idx{idx}"
+                
+                logger.info(f"Processing case {case_id}")
+                
+                try:
+                    trace = process_single_case(
+                        refiner=refiner,
+                        case_text=case_text,
+                        true_diagnosis=true_diagnosis,
+                        case_id=case_id,
+                    )
+                    
+                    # Add case hash for alignment
+                    trace.case_id = hash_case_text(case_text)
+                    
+                    all_traces.append(trace)
+                    logger_jsonl.log(trace)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process case {case_id}: {e}")
+                    continue
+            
+            logger.info(f"Completed batch {batch_num + 1}/{len(batches)}")
+            
+            # Delay between batches
+            if batch_num < len(batches) - 1:
+                time.sleep(10)
+    
+    runtime = time.time() - start_time
+    logger.info(f"Processed {len(all_traces)} cases in {runtime:.1f} seconds")
+    
+    # Compute BERTScores
+    bertscore_f1 = compute_bertscores(all_traces)
+    
+    # Export CSV for BERTScore compatibility
+    csv_path = output_dir / f"gpt4_free_text_refined_{timestamp}.csv"
+    CSVExporter.export_with_metrics(
+        traces=all_traces,
+        bertscore_f1=bertscore_f1,
+        output_path=csv_path,
+    )
+    logger.info(f"Saved CSV to {csv_path}")
+    
+    # Create and save summary report
+    report = create_summary_report(
+        traces=all_traces,
+        bertscore_f1=bertscore_f1,
+        config=config,
+        checklist_config=checklist_config,
+        runtime_seconds=runtime,
+    )
+    
+    report_path = output_dir / f"summary_report_{timestamp}.json"
+    save_summary_report(report, report_path)
+    logger.info(f"Saved summary report to {report_path}")
+    
+    # Print summary
+    print("\n" + "=" * 70)
+    print("REFINEMENT EVALUATION SUMMARY")
+    print("=" * 70)
+    print(f"Cases processed:      {len(all_traces)}")
+    print(f"BERTScore F1 (mean):  {report['metrics']['bertscore']['mean']:.4f}")
+    print(f"BERTScore F1 (std):   {report['metrics']['bertscore']['std']:.4f}")
+    print(f"CCR_all:              {report['metrics']['ccr']['CCR_all']:.2%}")
+    print(f"CCR_Q:                {report['metrics']['ccr']['CCR_Q']:.2%}")
+    print(f"CCR_H:                {report['metrics']['ccr']['CCR_H']:.2%}")
+    print(f"Compliance rate:      {report['metrics']['compliance_rate']:.2%}")
+    print(f"Hard fail rate:       {report['metrics']['hard_fail_rate']:.2%}")
+    if report['metrics']['iterations']['mean_to_compliance']:
+        print(f"Mean iterations:      {report['metrics']['iterations']['mean_to_compliance']:.2f}")
+    print(f"Runtime:              {runtime:.1f} seconds")
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    main()

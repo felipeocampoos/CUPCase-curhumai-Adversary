@@ -65,3 +65,152 @@ medlm_inference.ipynb
 ```
 MedLM-Large is a closed source model, requires specific access from Google to use.
 And is most easily accessible through Google Colab.
+
+---
+
+## Iterative Adversarial Refinement with Checklist Enforcement
+
+This module implements an iterative refinement pipeline that:
+1. Generates an initial diagnostic response (Generator)
+2. Evaluates it against an 8-item checklist + clinical quality (Critic)
+3. Applies targeted, minimal edits for failed items (Editor)
+4. Iterates until compliance or max iterations
+5. Logs metrics: CCR_all, CCR_Q, CCR_H, iterations to compliance, minimality of edits
+
+### Quick Start
+
+Run the refined open-ended evaluation:
+
+```bash
+python gpt_free_text_eval_refined.py
+```
+
+This will:
+- Process cases using the iterative refinement pipeline
+- Save a CSV with BERTScore on `final_diagnosis` (compatible with baseline)
+- Save a JSONL with full refinement traces and metrics
+
+### Command Line Options
+
+```bash
+python gpt_free_text_eval_refined.py \
+    --input datasets/Case_report_w_images_dis_VF.csv \
+    --output-dir output/refined \
+    --model gpt-4o \
+    --max-iterations 3 \
+    --clinical-threshold 3 \
+    --n-batches 4 \
+    --batch-size 250
+```
+
+### Compare Baseline vs Refined
+
+After running both baseline and refined evaluations, compare them:
+
+```bash
+python compare_baseline_vs_refined.py \
+    --baseline output/gpt4_free_text_batched.csv \
+    --refined output/refined/gpt4_free_text_refined_*.csv \
+    --refined-traces output/refined/refinement_traces_*.jsonl \
+    --output output/comparison_report.json
+```
+
+This produces:
+- JSON report with paired delta metrics and 95% CIs
+- Text report with significance tests
+
+### Configuring the Checklist
+
+The checklist is defined in `refinement/checklist.yaml`:
+
+```yaml
+checklist_items:
+  - id: "C1"
+    name: "Primary Diagnosis"
+    description: "Response includes a clear, specific primary diagnosis"
+    when_required: "always"
+    # ... more fields
+
+ccr_groups:
+  CCR_all:
+    items: ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]
+  CCR_Q:
+    items: ["C3", "C4", "C5"]  # Quality subset
+  CCR_H:
+    items: ["C6", "C7", "C8"]  # Health/safety subset
+```
+
+Modify this file to:
+- Change checklist item definitions
+- Adjust CCR group memberships
+- Set clinical quality thresholds
+
+### Response Contract
+
+Generator/Editor outputs strict JSON with these fields:
+- `final_diagnosis` (string, required) - scored with BERTScore
+- `differential` (list, optional)
+- `conditional_reasoning` (string, optional)
+- `clarifying_questions` (list, optional)
+- `red_flags` (list, optional)
+- `uncertainty` (string, optional)
+- `next_steps` (list, required)
+
+### Metrics Computed
+
+**CCR Metrics:**
+- `CCR_all`: % cases compliant on ALL 8 items
+- `CCR_Q`: % cases compliant on quality subset (clarifying questions, uncertainty, conditional reasoning)
+- `CCR_H`: % cases compliant on health/safety subset (red flags, next steps, consistency)
+
+**Minimality Metrics:**
+- `edit_distance_total`: Sum of edit distances across iterations
+- `edit_ratio_total`: Normalized edit ratio
+- `word_changes_total`: Total word-level changes
+
+**Iteration Metrics:**
+- `iterations_to_compliance`: Number of Critic→Editor cycles needed
+- `is_compliant`: Whether joint compliance was achieved
+
+### Running Tests
+
+```bash
+cd gpt_and_med_lm_evaluation
+pytest tests/test_refinement.py -v
+```
+
+### Module Structure
+
+```
+refinement/
+├── __init__.py          # Public API exports
+├── refiner.py           # Main IterativeRefiner class
+├── schema.py            # Data classes and JSON parsing
+├── metrics.py           # CCR and minimality metrics
+├── stats.py             # Paired bootstrap/permutation tests
+├── io.py                # JSONL logging utilities
+├── checklist.yaml       # Configurable checklist
+└── prompts/
+    ├── generator.md     # Generator prompt template
+    ├── critic.md        # Critic prompt template
+    └── editor.md        # Editor prompt template
+```
+
+### Output Files
+
+After running `gpt_free_text_eval_refined.py`:
+
+```
+output/refined/
+├── gpt4_free_text_refined_TIMESTAMP.csv    # BERTScore-compatible CSV
+├── refinement_traces_TIMESTAMP.jsonl        # Full refinement traces
+└── summary_report_TIMESTAMP.json            # Aggregate metrics
+```
+
+After running `compare_baseline_vs_refined.py`:
+
+```
+output/
+├── comparison_report.json    # Detailed comparison with CIs and p-values
+└── comparison_report.txt     # Human-readable summary
+```

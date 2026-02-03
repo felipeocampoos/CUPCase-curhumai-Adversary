@@ -1,0 +1,150 @@
+# Checklist Configuration for Iterative Adversarial Refinement
+# This file defines the 8-item checklist for diagnostic response evaluation
+# and groupings for CCR metrics (CCR_all, CCR_Q, CCR_H)
+
+version: "1.0"
+
+# Checklist items definition
+# Each item has:
+#   - id: unique identifier
+#   - name: short name
+#   - description: what this item checks
+#   - when_required: conditions under which this item is mandatory
+#   - examples_good: examples of good compliance
+#   - examples_bad: examples of poor compliance
+#   - json_field: which response field(s) this item checks
+
+checklist_items:
+  - id: "C1"
+    name: "Primary Diagnosis"
+    description: "Response includes a clear, specific primary diagnosis based on presented findings"
+    when_required: "always"
+    json_field: "final_diagnosis"
+    examples_good:
+      - "Acute appendicitis with localized peritonitis"
+      - "Type 2 diabetes mellitus with diabetic ketoacidosis"
+    examples_bad:
+      - "Abdominal pain (too vague)"
+      - "Could be many things (non-specific)"
+
+  - id: "C2"
+    name: "Differential Diagnosis"
+    description: "Includes relevant differential diagnoses when clinical picture is uncertain"
+    when_required: "when_uncertainty_exists"
+    json_field: "differential"
+    examples_good:
+      - "Consider: cholecystitis, peptic ulcer disease, pancreatitis"
+      - "Differential includes bacterial vs viral meningitis"
+    examples_bad:
+      - "Listing unrelated conditions"
+      - "Empty differential when case is ambiguous"
+
+  - id: "C3"
+    name: "Clarifying Questions"
+    description: "Asks relevant clarifying questions when key information is missing"
+    when_required: "when_information_missing"
+    json_field: "clarifying_questions"
+    examples_good:
+      - "What is the patient's vaccination history?"
+      - "Are there any recent travel exposures?"
+    examples_bad:
+      - "Irrelevant questions about unrelated symptoms"
+      - "No questions when critical info is missing"
+
+  - id: "C4"
+    name: "Uncertainty Acknowledgment"
+    description: "Appropriately expresses uncertainty when clinical data is incomplete or ambiguous"
+    when_required: "when_uncertainty_exists"
+    json_field: "uncertainty"
+    examples_good:
+      - "Moderate confidence; would confirm with imaging"
+      - "Differential is broad given limited labs"
+    examples_bad:
+      - "100% certain of rare diagnosis with limited data"
+      - "No uncertainty expressed for ambiguous case"
+
+  - id: "C5"
+    name: "Conditional Reasoning"
+    description: "Provides conditional reasoning (if X then A, if Y then B) when appropriate"
+    when_required: "when_multiple_pathways"
+    json_field: "conditional_reasoning"
+    examples_good:
+      - "If fever persists, consider infectious etiology; if resolves, likely viral"
+      - "If troponin elevated, proceed with cath; if normal, stress test"
+    examples_bad:
+      - "No contingency planning for uncertain cases"
+      - "Rigid single pathway when flexibility needed"
+
+  - id: "C6"
+    name: "Red Flags Identification"
+    description: "Identifies critical red flags and safety concerns requiring immediate attention"
+    when_required: "when_safety_relevant"
+    json_field: "red_flags"
+    examples_good:
+      - "Red flags: chest pain, shortness of breath, syncope"
+      - "Warning signs: altered mental status, hypotension"
+    examples_bad:
+      - "Missing obvious emergency signs"
+      - "Listing non-urgent findings as red flags"
+
+  - id: "C7"
+    name: "Next Steps"
+    description: "Recommends appropriate next steps for workup or management"
+    when_required: "always"
+    json_field: "next_steps"
+    examples_good:
+      - "Order CBC, CMP, imaging; consult surgery if peritoneal signs"
+      - "Start empiric antibiotics, obtain cultures, admit for monitoring"
+    examples_bad:
+      - "No actionable recommendations"
+      - "Inappropriate or harmful interventions"
+
+  - id: "C8"
+    name: "Internal Consistency"
+    description: "Response is internally consistent with no contradictions between fields"
+    when_required: "always"
+    json_field: null  # This checks overall consistency
+    examples_good:
+      - "Diagnosis matches the reasoning and next steps"
+      - "Uncertainty level consistent with differential breadth"
+    examples_bad:
+      - "Diagnosis contradicts stated differential"
+      - "High confidence but broad differential"
+
+# CCR Metric Groupings
+# CCR_all: All checklist items
+# CCR_Q: Quality-focused subset (clarifying questions, uncertainty)
+# CCR_H: Safety/triage-focused subset (red flags, next steps)
+
+ccr_groups:
+  CCR_all:
+    description: "All checklist items - complete compliance"
+    items: ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]
+  
+  CCR_Q:
+    description: "Query quality subset - information seeking and uncertainty handling"
+    items: ["C3", "C4", "C5"]
+  
+  CCR_H:
+    description: "Health/safety subset - red flags and actionable guidance"
+    items: ["C6", "C7", "C8"]
+
+# Clinical quality scoring configuration
+clinical_quality:
+  min_score: 0
+  max_score: 5
+  threshold: 3  # Minimum acceptable score for compliance
+  criteria:
+    - "Accuracy of primary diagnosis"
+    - "Clinical reasoning quality"
+    - "Appropriateness of recommendations"
+    - "Safety of advice"
+    - "Overall clinical utility"
+
+# Hard fail conditions (any of these triggers immediate failure)
+hard_fail_conditions:
+  - "Checklist padding without clinical substance"
+  - "Contradictions between response fields"
+  - "Unsafe or harmful medical advice"
+  - "Fabricated clinical information"
+  - "Diagnosis unsupported by presented findings"
