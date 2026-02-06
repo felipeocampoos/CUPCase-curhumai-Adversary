@@ -9,9 +9,38 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Callable
 from dataclasses import dataclass
+from enum import Enum
 import logging
 
 from openai import OpenAI
+
+
+class JudgeProvider(str, Enum):
+    """Supported LLM providers for judge/evaluation."""
+    
+    OPENAI = "openai"
+    DEEPSEEK = "deepseek"
+    
+    @property
+    def base_url(self) -> Optional[str]:
+        """Get the API base URL for the provider."""
+        if self == JudgeProvider.DEEPSEEK:
+            return "https://api.deepseek.com"
+        return None  # OpenAI uses default
+    
+    @property
+    def default_model(self) -> str:
+        """Get the default model for the provider."""
+        if self == JudgeProvider.DEEPSEEK:
+            return "deepseek-chat"
+        return "gpt-4o"
+    
+    @property
+    def env_var(self) -> str:
+        """Get the environment variable name for API key."""
+        if self == JudgeProvider.DEEPSEEK:
+            return "DEEPSEEK_API_KEY"
+        return "OPENAI_API_KEY"
 
 from .schema import (
     DiagnosticResponse,
@@ -55,6 +84,7 @@ class RefinerConfig:
     api_delay: float = 1.0
     temperature: float = 0.0
     checklist_config_path: Optional[Path] = None
+    provider: JudgeProvider = JudgeProvider.OPENAI
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -67,6 +97,7 @@ class RefinerConfig:
             "retry_delay": self.retry_delay,
             "api_delay": self.api_delay,
             "temperature": self.temperature,
+            "provider": self.provider.value,
         }
 
 
@@ -432,19 +463,19 @@ class IterativeRefiner:
         )
 
 
-def create_refiner(
+def create_client(
+    provider: JudgeProvider = JudgeProvider.OPENAI,
     api_key: Optional[str] = None,
-    config: Optional[RefinerConfig] = None,
-) -> IterativeRefiner:
+) -> OpenAI:
     """
-    Factory function to create an IterativeRefiner with OpenAI client.
+    Factory function to create an OpenAI-compatible client for the specified provider.
     
     Args:
+        provider: The LLM provider to use (openai, deepseek)
         api_key: Optional API key (uses environment variable if None)
-        config: Optional RefinerConfig
         
     Returns:
-        Configured IterativeRefiner
+        OpenAI client configured for the provider
     """
     import os
     from dotenv import load_dotenv
@@ -452,9 +483,37 @@ def create_refiner(
     load_dotenv()
     
     if api_key is None:
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get(provider.env_var)
     
-    client = OpenAI(api_key=api_key)
+    if provider.base_url:
+        return OpenAI(api_key=api_key, base_url=provider.base_url)
+    return OpenAI(api_key=api_key)
+
+
+def create_refiner(
+    api_key: Optional[str] = None,
+    config: Optional[RefinerConfig] = None,
+    provider: Optional[JudgeProvider] = None,
+) -> IterativeRefiner:
+    """
+    Factory function to create an IterativeRefiner with OpenAI-compatible client.
+    
+    Args:
+        api_key: Optional API key (uses environment variable if None)
+        config: Optional RefinerConfig
+        provider: Optional provider (defaults to config.provider or OPENAI)
+        
+    Returns:
+        Configured IterativeRefiner
+    """
+    if config is None:
+        config = RefinerConfig()
+    
+    # Determine provider: explicit arg > config > default
+    if provider is None:
+        provider = config.provider
+    
+    client = create_client(provider=provider, api_key=api_key)
     
     return IterativeRefiner(client=client, config=config)
 

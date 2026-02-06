@@ -9,7 +9,7 @@ This module provides components for:
 5. Computing metrics: CCR_all, CCR_Q, CCR_H, iterations to compliance, minimality of edits
 """
 
-from .refiner import IterativeRefiner
+from .refiner import IterativeRefiner, JudgeProvider, create_client, create_refiner
 from .schema import (
     DiagnosticResponse,
     ChecklistItem,
@@ -28,6 +28,9 @@ from .io import JSONLLogger, load_refinement_traces
 
 __all__ = [
     "IterativeRefiner",
+    "JudgeProvider",
+    "create_client",
+    "create_refiner",
     "DiagnosticResponse",
     "ChecklistItem",
     "CriticResult",

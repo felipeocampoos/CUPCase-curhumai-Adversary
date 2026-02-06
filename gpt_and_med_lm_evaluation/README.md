@@ -21,6 +21,11 @@ To use gpt-4o (or any OpenAI model) for evaluation, please create and place your
 ```bash
 OPENAI_API_KEY="YOUR_API_KEY_HERE"
 ```
+
+To use DeepSeek Chat as a judge model, add your DeepSeek API key:
+```bash
+DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE"
+```
 ## Usage
 
 To perform evaluation, run the specific evaluation script you wish to use. For example:
@@ -65,6 +70,60 @@ medlm_inference.ipynb
 ```
 MedLM-Large is a closed source model, requires specific access from Google to use.
 And is most easily accessible through Google Colab.
+
+---
+
+## DeepSeek Chat
+
+DeepSeek Chat can be used as an alternative judge model for evaluation. It uses an OpenAI-compatible API.
+
+### Setup
+
+Set your DeepSeek API key in the `.env` file:
+```bash
+DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE"
+```
+
+### Multiple-choice evaluation
+
+Used for evaluating DeepSeek Chat with the multiple-choice QA in CUPCase.
+```bash
+python deepseek_qa_eval.py --input ablation_study_tokens.csv --output output/deepseek_multiple_choice.csv
+```
+
+### Open-ended evaluation
+
+Used for evaluating DeepSeek Chat with the open-ended QA in CUPCase.
+```bash
+python deepseek_free_text_eval.py --input datasets/Case_report_w_images_dis_VF.csv --output output/deepseek_free_text.csv
+```
+
+### Command Line Options
+
+Both scripts support the following options:
+- `--input`: Path to input dataset CSV
+- `--output`: Path to output CSV file
+- `--model`: DeepSeek model to use (default: `deepseek-chat`)
+- `--n-batches`: Number of batches to sample (default: 4)
+- `--batch-size`: Size of each batch (default: 250)
+
+### Using DeepSeek with Iterative Refinement
+
+The refinement module also supports DeepSeek as a provider:
+
+```python
+from refinement import create_refiner, JudgeProvider
+from refinement.refiner import RefinerConfig
+
+config = RefinerConfig(
+    generator_model="deepseek-chat",
+    critic_model="deepseek-chat", 
+    editor_model="deepseek-chat",
+    provider=JudgeProvider.DEEPSEEK,
+)
+
+refiner = create_refiner(config=config)
+```
 
 ---
 
