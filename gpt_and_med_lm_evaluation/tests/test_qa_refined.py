@@ -44,6 +44,15 @@ def test_parse_discriminator_choice_json():
     assert rationale == "why"
 
 
+def test_parse_discriminator_choice_rank_relative_mapping():
+    final_idx, _, _ = parse_discriminator_choice(
+        '{"final_choice_index": 1, "differentiators": [], "rationale": "why"}',
+        4,
+        candidate_indices=[3, 1, 2],
+    )
+    assert final_idx == 3
+
+
 def test_extract_distractors_prefers_unique_values():
     row = pd.Series(
         {
@@ -59,3 +68,7 @@ def test_extract_distractors_prefers_unique_values():
 
 def test_valid_variants_include_discriminative_question():
     assert "discriminative_question" in VALID_VARIANTS
+
+
+def test_valid_variants_include_progressive_disclosure():
+    assert "progressive_disclosure" in VALID_VARIANTS

@@ -92,6 +92,24 @@ def parse_args():
         help="Cosine similarity threshold for semantic_similarity_gated variant",
     )
     parser.add_argument(
+        "--disclosure-fraction",
+        type=float,
+        default=0.2,
+        help="Early-case fraction for progressive_disclosure variant",
+    )
+    parser.add_argument(
+        "--early-confidence-threshold",
+        type=float,
+        default=0.8,
+        help="Early confidence threshold used for revision-penalty telemetry",
+    )
+    parser.add_argument(
+        "--revision-instability-threshold",
+        type=float,
+        default=0.5,
+        help="Confidence shift threshold used for revision-penalty telemetry",
+    )
+    parser.add_argument(
         "--n-batches",
         type=int,
         default=4,
@@ -284,6 +302,9 @@ def main():
         max_iterations=args.max_iterations,
         clinical_quality_threshold=args.clinical_threshold,
         similarity_threshold=args.similarity_threshold,
+        disclosure_fraction=args.disclosure_fraction,
+        early_confidence_threshold=args.early_confidence_threshold,
+        revision_instability_threshold=args.revision_instability_threshold,
     )
     
     # Create refiner variant

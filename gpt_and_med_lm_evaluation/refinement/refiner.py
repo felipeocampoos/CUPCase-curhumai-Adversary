@@ -84,6 +84,9 @@ class RefinerConfig:
     api_delay: float = 1.0
     temperature: float = 0.0
     similarity_threshold: float = 0.65
+    disclosure_fraction: float = 0.2
+    early_confidence_threshold: float = 0.8
+    revision_instability_threshold: float = 0.5
     checklist_config_path: Optional[Path] = None
     provider: JudgeProvider = JudgeProvider.OPENAI
     
@@ -99,6 +102,9 @@ class RefinerConfig:
             "api_delay": self.api_delay,
             "temperature": self.temperature,
             "similarity_threshold": self.similarity_threshold,
+            "disclosure_fraction": self.disclosure_fraction,
+            "early_confidence_threshold": self.early_confidence_threshold,
+            "revision_instability_threshold": self.revision_instability_threshold,
             "provider": self.provider.value,
         }
 

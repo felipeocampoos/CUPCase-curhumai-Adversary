@@ -1,4 +1,4 @@
-"""MCQ evaluation with baseline, similarity-gated, and discriminative-question variants."""
+"""MCQ evaluation with baseline and refinement variants (semantic, discriminative, progressive)."""
 
 from __future__ import annotations
 
@@ -25,12 +25,24 @@ from refinement.similarity_gating import (
     JinaEmbeddingService,
     compute_similarity_for_top3,
 )
+from refinement.progressive_disclosure import (
+    compute_belief_revision_scores,
+    format_early_options_for_prompt,
+    parse_early_ranked_option_indices_mcq,
+    parse_revision_decision_mcq,
+    truncate_case_by_fraction,
+)
 
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-VALID_VARIANTS = ["baseline", "semantic_similarity_gated", "discriminative_question"]
+VALID_VARIANTS = [
+    "baseline",
+    "semantic_similarity_gated",
+    "discriminative_question",
+    "progressive_disclosure",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +56,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=250)
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--similarity-threshold", type=float, default=0.65)
+    parser.add_argument("--disclosure-fraction", type=float, default=0.2)
+    parser.add_argument("--early-confidence-threshold", type=float, default=0.8)
+    parser.add_argument("--revision-instability-threshold", type=float, default=0.5)
     parser.add_argument("--retry-attempts", type=int, default=3)
     parser.add_argument("--retry-delay", type=float, default=60.0)
     parser.add_argument("--api-delay", type=float, default=1.0)
@@ -123,12 +138,26 @@ def parse_ranked_indices(text: str, num_options: int) -> Tuple[List[int], str]:
     return parsed[:3], rationale
 
 
-def parse_discriminator_choice(text: str, num_options: int) -> Tuple[int, List[str], str]:
+def parse_discriminator_choice(
+    text: str,
+    num_options: int,
+    candidate_indices: Sequence[int] | None = None,
+) -> Tuple[int, List[str], str]:
     data = extract_json_from_response(text)
 
-    final_choice = int(data.get("final_choice_index", -1)) - 1
-    if final_choice < 0 or final_choice >= num_options:
-        raise ValueError("Invalid discriminator final_choice_index")
+    raw_choice = int(data.get("final_choice_index", -1)) - 1
+    if candidate_indices:
+        # Prefer rank-relative decoding because prompt lists a ranked block.
+        if 0 <= raw_choice < len(candidate_indices):
+            final_choice = int(candidate_indices[raw_choice])
+        elif 0 <= raw_choice < num_options:
+            final_choice = raw_choice
+        else:
+            raise ValueError("Invalid discriminator final_choice_index")
+    else:
+        final_choice = raw_choice
+        if final_choice < 0 or final_choice >= num_options:
+            raise ValueError("Invalid discriminator final_choice_index")
 
     differentiators = data.get("differentiators", [])
     if not isinstance(differentiators, list):
@@ -275,6 +304,7 @@ def evaluate_case_semantic_similarity(
         final_choice, differentiators, rationale = parse_discriminator_choice(
             raw_discriminator,
             len(options),
+            ranked_indices[:3],
         )
         telemetry["discriminator_rationale"] = rationale
         telemetry["differentiators"] = differentiators
@@ -407,6 +437,7 @@ def evaluate_case_discriminative_question(
         final_choice, integration_summary, rationale = parse_integrated_decision_mcq(
             raw_integration,
             len(options),
+            ranked_indices[:3],
         )
         telemetry["integration_summary"] = integration_summary
         telemetry["discriminator_rationale"] = rationale
@@ -414,6 +445,106 @@ def evaluate_case_discriminative_question(
     except Exception as exc:
         telemetry["integration_error"] = str(exc)
         return ranked_indices[0], telemetry
+
+
+def evaluate_case_progressive_disclosure(
+    client,
+    model: str,
+    case_text: str,
+    options: Sequence[str],
+    early_prompt_template: str,
+    revision_prompt_template: str,
+    disclosure_fraction: float,
+    early_conf_threshold: float,
+    revision_instability_threshold: float,
+    retry_attempts: int,
+    retry_delay: float,
+) -> Tuple[int, Dict[str, Any]]:
+    options_text = "\n".join(f"{i+1}. {option}" for i, option in enumerate(options))
+    early_case_text = truncate_case_by_fraction(case_text, fraction=disclosure_fraction)
+
+    telemetry: Dict[str, Any] = {
+        "variant": "progressive_disclosure",
+        "early_candidate_top3": [],
+        "early_candidate_rationale": "",
+        "early_top_confidence": None,
+        "revision_summary": "",
+        "revision_evidence": "",
+        "anchoring_flag": False,
+        "confidence_instability_score": 0.0,
+        "revision_delta": 0.0,
+        "belief_penalty_score": 0.0,
+    }
+
+    early_prompt = early_prompt_template.replace("{options_text}", options_text).replace(
+        "{early_case_text}", early_case_text
+    )
+    try:
+        raw_early = call_model(client, model, early_prompt, retry_attempts, retry_delay)
+        early = parse_early_ranked_option_indices_mcq(raw_early, len(options))
+    except Exception as exc:
+        telemetry["early_error"] = str(exc)
+        return -1, telemetry
+
+    telemetry["early_candidate_top3"] = early.ranked_indices
+    telemetry["early_candidate_rationale"] = early.rationale
+    telemetry["early_top_confidence"] = early.confidences[0] if early.confidences else None
+
+    early_ranked_block = format_early_options_for_prompt(
+        options=options,
+        ranked_indices=early.ranked_indices[:3],
+        confidences=early.confidences,
+    )
+    revision_prompt = revision_prompt_template.replace(
+        "{early_ranked_block}", early_ranked_block
+    ).replace(
+        "{early_case_text}", early_case_text
+    ).replace(
+        "{case_text}", case_text
+    )
+    try:
+        raw_revision = call_model(client, model, revision_prompt, retry_attempts, retry_delay)
+        revision = parse_revision_decision_mcq(
+            raw_revision,
+            len(options),
+            early.ranked_indices[:3],
+        )
+    except Exception as exc:
+        telemetry["revision_error"] = str(exc)
+        return early.ranked_indices[0], telemetry
+
+    early_top_idx = early.ranked_indices[0]
+    early_top_label = options[early_top_idx]
+    final_label = options[revision.final_choice_index]
+    early_top_conf = early.confidences[0] if early.confidences else 0.0
+
+    scores = compute_belief_revision_scores(
+        early_top_label=early_top_label,
+        final_label=final_label,
+        early_top_confidence=early_top_conf,
+        final_confidence=revision.final_confidence,
+        contradiction_found=revision.contradiction_found,
+        kept_labels=[options[idx] for idx in revision.kept_indices if 0 <= idx < len(options)],
+    )
+
+    instability = scores.confidence_instability_score
+    if instability < revision_instability_threshold:
+        instability = 0.0
+    if early_top_conf < early_conf_threshold:
+        instability = 0.0
+    penalty = (0.5 * float(scores.anchoring_flag)) + (0.3 * instability) + (
+        0.2 * (1.0 if (scores.revision_delta >= 1.0 and not revision.contradiction_found) else 0.0)
+    )
+    penalty = max(0.0, min(1.0, penalty))
+
+    telemetry["revision_summary"] = revision.revision_summary
+    telemetry["revision_evidence"] = revision.rationale
+    telemetry["anchoring_flag"] = scores.anchoring_flag
+    telemetry["confidence_instability_score"] = instability
+    telemetry["revision_delta"] = scores.revision_delta
+    telemetry["belief_penalty_score"] = penalty
+
+    return revision.final_choice_index, telemetry
 
 
 def process_batch(
@@ -426,13 +557,15 @@ def process_batch(
     question_prompt_template: str,
     answer_prompt_template: str,
     integration_prompt_template: str,
+    early_prompt_template: str,
+    revision_prompt_template: str,
     random_seed: int,
 ) -> List[Dict[str, Any]]:
     results = []
     rng = random.Random(random_seed)
 
     for _, row in batch.iterrows():
-        case_text = str(row["case presentation"])
+        case_text = str(row.get("case presentation", row.get("clean text", "")))
         true_diagnosis = str(row["final diagnosis"])
 
         try:
@@ -472,6 +605,20 @@ def process_batch(
                 retry_attempts=args.retry_attempts,
                 retry_delay=args.retry_delay,
             )
+        elif args.variant == "progressive_disclosure":
+            predicted_index, telemetry = evaluate_case_progressive_disclosure(
+                client=client,
+                model=args.model,
+                case_text=case_text,
+                options=options,
+                early_prompt_template=early_prompt_template,
+                revision_prompt_template=revision_prompt_template,
+                disclosure_fraction=args.disclosure_fraction,
+                early_conf_threshold=args.early_confidence_threshold,
+                revision_instability_threshold=args.revision_instability_threshold,
+                retry_attempts=args.retry_attempts,
+                retry_delay=args.retry_delay,
+            )
         else:
             predicted_index, telemetry = evaluate_case_baseline(
                 client=client,
@@ -506,8 +653,19 @@ def process_batch(
                 "Integration Summary": telemetry.get("integration_summary", ""),
                 "Discriminator Rationale": telemetry.get("discriminator_rationale", ""),
                 "Differentiators JSON": json.dumps(telemetry.get("differentiators", [])),
+                "Early Candidate Top3": json.dumps(telemetry.get("early_candidate_top3", [])),
+                "Early Candidate Rationale": telemetry.get("early_candidate_rationale", ""),
+                "Early Top Confidence": telemetry.get("early_top_confidence"),
+                "Revision Summary": telemetry.get("revision_summary", ""),
+                "Revision Evidence": telemetry.get("revision_evidence", ""),
+                "Anchoring Flag": telemetry.get("anchoring_flag", False),
+                "Confidence Instability Score": telemetry.get("confidence_instability_score"),
+                "Revision Delta": telemetry.get("revision_delta"),
+                "Belief Penalty Score": telemetry.get("belief_penalty_score"),
                 "Error": telemetry.get("candidate_error")
                 or telemetry.get("similarity_error")
+                or telemetry.get("early_error")
+                or telemetry.get("revision_error")
                 or telemetry.get("question_error")
                 or telemetry.get("answer_error")
                 or telemetry.get("integration_error")
@@ -533,10 +691,16 @@ def main() -> None:
         prompt_folder = "semantic_similarity"
     elif args.variant == "discriminative_question":
         prompt_folder = "discriminative_question"
+    elif args.variant == "progressive_disclosure":
+        prompt_folder = "progressive_disclosure"
     else:
         prompt_folder = "semantic_similarity"
 
-    candidate_prompt_template = load_prompt_template(prompt_folder, "candidate_mcq")
+    candidate_prompt_template = (
+        load_prompt_template(prompt_folder, "candidate_mcq")
+        if args.variant in {"semantic_similarity_gated", "discriminative_question"}
+        else ""
+    )
     discriminator_prompt_template = load_prompt_template(
         "semantic_similarity",
         "discriminator_mcq",
@@ -544,6 +708,8 @@ def main() -> None:
     question_prompt_template = load_prompt_template(prompt_folder, "question_mcq") if args.variant == "discriminative_question" else ""
     answer_prompt_template = load_prompt_template(prompt_folder, "answer_extraction_mcq") if args.variant == "discriminative_question" else ""
     integration_prompt_template = load_prompt_template(prompt_folder, "integrate_mcq") if args.variant == "discriminative_question" else ""
+    early_prompt_template = load_prompt_template(prompt_folder, "early_mcq") if args.variant == "progressive_disclosure" else ""
+    revision_prompt_template = load_prompt_template(prompt_folder, "revision_mcq") if args.variant == "progressive_disclosure" else ""
 
     all_results: List[Dict[str, Any]] = []
 
@@ -561,6 +727,8 @@ def main() -> None:
             question_prompt_template=question_prompt_template,
             answer_prompt_template=answer_prompt_template,
             integration_prompt_template=integration_prompt_template,
+            early_prompt_template=early_prompt_template,
+            revision_prompt_template=revision_prompt_template,
             random_seed=args.random_seed + batch_num,
         )
         all_results.extend(batch_results)

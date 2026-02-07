@@ -15,6 +15,7 @@ from .variants import (
     DiscriminativeQuestionRefiner,
     DomainRoutedRefiner,
     HeuristicDomainRouter,
+    ProgressiveDisclosureRefiner,
     RouteDecision,
     SemanticSimilarityGatedRefiner,
 )
@@ -30,6 +31,10 @@ from .metrics import (
     compute_edit_distance,
     compute_ccr_metrics,
     compute_minimality_metrics,
+    aggregate_minimality_metrics,
+    compute_clinical_quality_stats,
+    compute_hard_fail_rate,
+    compute_compliance_rate,
 )
 from .stats import paired_bootstrap_ci, paired_permutation_test
 from .io import JSONLLogger, load_refinement_traces
@@ -53,6 +58,20 @@ from .discriminative_questioning import (
     parse_answer_extraction,
     parse_integrated_decision_free_text,
 )
+from .progressive_disclosure import (
+    BeliefRevisionScores,
+    EarlyCandidate,
+    EarlyDifferential,
+    EarlyRankedOptions,
+    RevisionDecisionFreeText,
+    RevisionDecisionMCQ,
+    compute_belief_revision_scores,
+    parse_early_differential_free_text,
+    parse_early_ranked_option_indices_mcq,
+    parse_revision_decision_free_text,
+    parse_revision_decision_mcq,
+    truncate_case_by_fraction,
+)
 
 __all__ = [
     "IterativeRefiner",
@@ -70,12 +89,17 @@ __all__ = [
     "compute_edit_distance",
     "compute_ccr_metrics",
     "compute_minimality_metrics",
+    "aggregate_minimality_metrics",
+    "compute_clinical_quality_stats",
+    "compute_hard_fail_rate",
+    "compute_compliance_rate",
     "paired_bootstrap_ci",
     "paired_permutation_test",
     "JSONLLogger",
     "load_refinement_traces",
     "DomainRoutedRefiner",
     "DiscriminativeQuestionRefiner",
+    "ProgressiveDisclosureRefiner",
     "SemanticSimilarityGatedRefiner",
     "HeuristicDomainRouter",
     "RouteDecision",
@@ -95,4 +119,16 @@ __all__ = [
     "parse_discriminative_question",
     "parse_answer_extraction",
     "parse_integrated_decision_free_text",
+    "EarlyCandidate",
+    "EarlyDifferential",
+    "EarlyRankedOptions",
+    "RevisionDecisionFreeText",
+    "RevisionDecisionMCQ",
+    "BeliefRevisionScores",
+    "truncate_case_by_fraction",
+    "compute_belief_revision_scores",
+    "parse_early_differential_free_text",
+    "parse_early_ranked_option_indices_mcq",
+    "parse_revision_decision_free_text",
+    "parse_revision_decision_mcq",
 ]

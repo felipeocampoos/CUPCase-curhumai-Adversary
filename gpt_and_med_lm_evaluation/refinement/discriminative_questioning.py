@@ -200,13 +200,27 @@ def parse_integrated_decision_free_text(text: str) -> FreeTextIntegratedOutput:
     return FreeTextIntegratedOutput(response=response, decision=decision)
 
 
-def parse_integrated_decision_mcq(text: str, num_options: int) -> Tuple[int, str, str]:
+def parse_integrated_decision_mcq(
+    text: str,
+    num_options: int,
+    candidate_indices: Sequence[int] | None = None,
+) -> Tuple[int, str, str]:
     """Parse integrated MCQ decision payload."""
     data = extract_json_from_response(text)
 
-    final_choice = int(data.get("final_choice_index", -1)) - 1
-    if final_choice < 0 or final_choice >= num_options:
-        raise ValueError("Invalid integrated final_choice_index")
+    raw_choice = int(data.get("final_choice_index", -1)) - 1
+    if candidate_indices:
+        # Prefer rank-relative decoding because the prompt presents a candidate block.
+        if 0 <= raw_choice < len(candidate_indices):
+            final_choice = int(candidate_indices[raw_choice])
+        elif 0 <= raw_choice < num_options:
+            final_choice = raw_choice
+        else:
+            raise ValueError("Invalid integrated final_choice_index")
+    else:
+        final_choice = raw_choice
+        if final_choice < 0 or final_choice >= num_options:
+            raise ValueError("Invalid integrated final_choice_index")
 
     integration_summary = str(data.get("integration_summary", "")).strip()
     rationale = str(data.get("rationale", "")).strip()

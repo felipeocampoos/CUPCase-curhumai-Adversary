@@ -49,7 +49,7 @@ gpt_qa_eval.py
 
 ### Multiple-choice evaluation (refined variants)
 
-Used for running baseline, semantic-similarity-gated, or discriminative-question MCQ evaluation with telemetry.
+Used for running baseline, semantic-similarity-gated, discriminative-question, or progressive-disclosure MCQ evaluation with telemetry.
 Run:
 ```bash
 python gpt_qa_eval_refined.py --variant discriminative_question
@@ -166,6 +166,7 @@ Available variants:
 - `domain_routed`: Domain Routed Prompt Specialization (implemented idea #5)
 - `semantic_similarity_gated`: Semantic Similarity Gated Differential Reasoning (implemented idea #2)
 - `discriminative_question`: Self Generated Discriminative Questions with Answer Integration (implemented idea #4)
+- `progressive_disclosure`: Progressive Disclosure with Explicit Belief Revision (implemented idea #3)
 
 Run a specific variant:
 
@@ -203,6 +204,18 @@ Or use the dedicated wrapper:
 python gpt_free_text_eval_refined_discriminative_question.py
 ```
 
+Progressive-disclosure variant:
+
+```bash
+python gpt_free_text_eval_refined.py --variant progressive_disclosure
+```
+
+Or use the dedicated wrapper:
+
+```bash
+python gpt_free_text_eval_refined_progressive_disclosure.py
+```
+
 ### Command Line Options
 
 ```bash
@@ -214,6 +227,9 @@ python gpt_free_text_eval_refined.py \
     --max-iterations 3 \
     --clinical-threshold 3 \
     --similarity-threshold 0.65 \
+    --disclosure-fraction 0.2 \
+    --early-confidence-threshold 0.8 \
+    --revision-instability-threshold 0.5 \
     --n-batches 4 \
     --batch-size 250
 ```
@@ -265,6 +281,21 @@ Per-case telemetry (in `variant_metadata`) includes:
 - extracted answer and confidence
 - evidence spans used for re-integration
 - integration summary and final selection source
+
+### Implemented Variant: Progressive Disclosure with Explicit Belief Revision
+
+`progressive_disclosure` enforces a two-stage reasoning pattern:
+- Stage 1 uses only the first 20% of the case to produce an early differential.
+- Stage 2 uses the full case and explicitly reports what changed in the differential.
+- Belief-revision penalty signals are logged as telemetry (no forced decision override).
+
+Per-case telemetry (in `variant_metadata`) includes:
+- early top-3 and confidences
+- revision kept/dropped/added hypotheses
+- anchoring flag
+- confidence instability score
+- revision delta
+- belief penalty score
 
 ### Compare Baseline vs Refined
 
@@ -339,7 +370,7 @@ Generator/Editor outputs strict JSON with these fields:
 
 ```bash
 cd gpt_and_med_lm_evaluation
-pytest tests/test_refinement.py tests/test_variants.py tests/test_similarity_gating.py tests/test_discriminative_questioning.py tests/test_domain_routed_wrapper.py tests/test_semantic_wrapper.py tests/test_discriminative_wrapper.py tests/test_qa_refined.py -v
+pytest tests/test_refinement.py tests/test_variants.py tests/test_similarity_gating.py tests/test_discriminative_questioning.py tests/test_progressive_disclosure.py tests/test_domain_routed_wrapper.py tests/test_semantic_wrapper.py tests/test_discriminative_wrapper.py tests/test_progressive_wrapper.py tests/test_qa_refined.py -v
 ```
 
 ### Module Structure
@@ -350,6 +381,7 @@ refinement/
 ├── refiner.py           # Main IterativeRefiner class
 ├── variant_factory.py   # Variant registry + factory
 ├── discriminative_questioning.py # Shared question-answer integration core
+├── progressive_disclosure.py # Shared early/full-stage belief revision core
 ├── similarity_gating.py # Shared candidate similarity gate core
 ├── schema.py            # Data classes and JSON parsing
 ├── metrics.py           # CCR and minimality metrics
@@ -360,7 +392,8 @@ refinement/
 │   ├── __init__.py
 │   ├── domain_routed.py             # Domain routed variant implementation
 │   ├── semantic_similarity_gated.py # Similarity-gated variant implementation
-│   └── discriminative_question.py   # Discriminative-question variant implementation
+│   ├── discriminative_question.py   # Discriminative-question variant implementation
+│   └── progressive_disclosure.py    # Progressive-disclosure variant implementation
 └── prompts/
     ├── generator.md     # Generator prompt template
     ├── critic.md        # Critic prompt template
@@ -371,6 +404,9 @@ refinement/
     │   ├── question_free_text.md
     │   ├── answer_extraction_free_text.md
     │   └── integrate_free_text.md
+    ├── progressive_disclosure/
+    │   ├── early_free_text.md
+    │   └── revision_free_text.md
     └── semantic_similarity/
         ├── candidate_free_text.md
         └── discriminator_free_text.md
@@ -439,7 +475,7 @@ python gpt_free_text_eval_refined.py \
 
 ## MCQ Refined Evaluation
 
-Use the new MCQ refined runner for baseline, similarity-gated, or discriminative-question evaluation:
+Use the new MCQ refined runner for baseline, similarity-gated, discriminative-question, or progressive-disclosure evaluation:
 
 ```bash
 python gpt_qa_eval_refined.py \
@@ -466,3 +502,12 @@ Additional MCQ output columns:
 - `Integration Summary`
 - `Discriminator Rationale`
 - `Differentiators JSON`
+- `Early Candidate Top3`
+- `Early Candidate Rationale`
+- `Early Top Confidence`
+- `Revision Summary`
+- `Revision Evidence`
+- `Anchoring Flag`
+- `Confidence Instability Score`
+- `Revision Delta`
+- `Belief Penalty Score`

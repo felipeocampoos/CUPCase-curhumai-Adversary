@@ -20,6 +20,7 @@ from refinement.variants.domain_routed import (
 )
 from refinement.variants.semantic_similarity_gated import SemanticSimilarityGatedRefiner
 from refinement.variants.discriminative_question import DiscriminativeQuestionRefiner
+from refinement.variants.progressive_disclosure import ProgressiveDisclosureRefiner
 from refinement.similarity_gating import (
     Candidate,
     CandidateSet,
@@ -40,6 +41,14 @@ from refinement.discriminative_questioning import (
     parse_discriminative_question,
     parse_integrated_decision_free_text,
     parse_ranked_candidates,
+)
+from refinement.progressive_disclosure import (
+    EarlyDifferential,
+    EarlyCandidate,
+    RevisionDecisionFreeText,
+    BeliefRevisionScores,
+    parse_early_differential_free_text,
+    parse_revision_decision_free_text,
 )
 
 
@@ -93,6 +102,7 @@ def test_list_refiner_variants_contains_expected_entries():
     assert "domain_routed" in variants
     assert "semantic_similarity_gated" in variants
     assert "discriminative_question" in variants
+    assert "progressive_disclosure" in variants
 
 
 def test_create_refiner_variant_domain_routed():
@@ -120,6 +130,15 @@ def test_create_refiner_variant_discriminative_question():
         config=RefinerConfig(),
     )
     assert isinstance(refiner, DiscriminativeQuestionRefiner)
+
+
+def test_create_refiner_variant_progressive_disclosure():
+    refiner = create_refiner_variant(
+        variant="progressive_disclosure",
+        api_key="test-key",
+        config=RefinerConfig(),
+    )
+    assert isinstance(refiner, ProgressiveDisclosureRefiner)
 
 
 def test_heuristic_router_routes_oncology_case():
@@ -356,3 +375,76 @@ def test_discriminative_question_variant_fallback_on_question_error(monkeypatch)
     metadata = refiner._get_case_variant_metadata()
     assert "question_error" in metadata
     assert metadata["final_selection_source"] == "baseline_fallback_question_error"
+
+
+def test_progressive_disclosure_variant_happy_path(monkeypatch):
+    refiner = ProgressiveDisclosureRefiner(client=object(), config=RefinerConfig())
+
+    early = EarlyDifferential(
+        candidates=[
+            EarlyCandidate(label="Dx A", confidence=0.85, rationale="early support"),
+            EarlyCandidate(label="Dx B", confidence=0.10, rationale="less likely"),
+            EarlyCandidate(label="Dx C", confidence=0.05, rationale="least likely"),
+        ],
+        raw_response="{}",
+    )
+    revision = RevisionDecisionFreeText(
+        response=DiagnosticResponse(
+            final_diagnosis="Dx B",
+            conditional_reasoning="full case revised diagnosis",
+            next_steps=["step"],
+        ),
+        final_choice="Dx B",
+        final_confidence=0.61,
+        revision_summary="Dropped Dx A after contradictory lab",
+        kept_hypotheses=[],
+        dropped_hypotheses=["Dx A"],
+        added_hypotheses=["Dx B"],
+        contradiction_found=True,
+        rationale="contradictory evidence in full case",
+        raw_response="{}",
+    )
+
+    def fake_call_api(model, prompt, parse_fn):
+        if parse_fn is parse_early_differential_free_text:
+            return early, "{}"
+        if parse_fn is parse_revision_decision_free_text:
+            return revision, "{}"
+        raise AssertionError("Unexpected parse function")
+
+    monkeypatch.setattr(refiner, "_call_api", fake_call_api)
+    response, _ = refiner.generate("Case text with enough tokens to split")
+
+    assert response.final_diagnosis == "Dx B"
+    metadata = refiner._get_case_variant_metadata()
+    assert metadata["final_selection_source"] == "full_case_revision"
+    assert "belief_penalty_score" in metadata
+
+
+def test_progressive_disclosure_variant_fallback_on_revision_error(monkeypatch):
+    refiner = ProgressiveDisclosureRefiner(client=object(), config=RefinerConfig())
+
+    early = EarlyDifferential(
+        candidates=[
+            EarlyCandidate(label="Dx A", confidence=0.70, rationale="early support"),
+            EarlyCandidate(label="Dx B", confidence=0.20, rationale="alt"),
+        ],
+        raw_response="{}",
+    )
+
+    def fake_call_api(model, prompt, parse_fn):
+        if parse_fn is parse_early_differential_free_text:
+            return early, "{}"
+        if parse_fn is parse_revision_decision_free_text:
+            raise ValueError("revision parse failed")
+        if parse_fn is parse_diagnostic_response:
+            return DiagnosticResponse(final_diagnosis="Fallback diagnosis", next_steps=["step"]), "{}"
+        raise AssertionError("Unexpected parse function")
+
+    monkeypatch.setattr(refiner, "_call_api", fake_call_api)
+    response, _ = refiner.generate("Case text")
+
+    assert response.final_diagnosis == "Fallback diagnosis"
+    metadata = refiner._get_case_variant_metadata()
+    assert "revision_stage_error" in metadata
+    assert metadata["final_selection_source"] == "baseline_fallback_revision_error"

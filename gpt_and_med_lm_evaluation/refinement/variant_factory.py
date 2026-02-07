@@ -11,6 +11,7 @@ from .refiner import (
 from .variants import (
     DiscriminativeQuestionRefiner,
     DomainRoutedRefiner,
+    ProgressiveDisclosureRefiner,
     SemanticSimilarityGatedRefiner,
 )
 
@@ -20,6 +21,7 @@ VARIANT_REGISTRY: Dict[str, Type[IterativeRefiner]] = {
     "domain_routed": DomainRoutedRefiner,
     "semantic_similarity_gated": SemanticSimilarityGatedRefiner,
     "discriminative_question": DiscriminativeQuestionRefiner,
+    "progressive_disclosure": ProgressiveDisclosureRefiner,
 }
 
 

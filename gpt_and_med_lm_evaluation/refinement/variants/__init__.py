@@ -7,6 +7,7 @@ from .domain_routed import (
 )
 from .semantic_similarity_gated import SemanticSimilarityGatedRefiner
 from .discriminative_question import DiscriminativeQuestionRefiner
+from .progressive_disclosure import ProgressiveDisclosureRefiner
 
 __all__ = [
     "DomainRoutedRefiner",
@@ -14,4 +15,5 @@ __all__ = [
     "RouteDecision",
     "SemanticSimilarityGatedRefiner",
     "DiscriminativeQuestionRefiner",
+    "ProgressiveDisclosureRefiner",
 ]

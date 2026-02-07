@@ -86,3 +86,13 @@ def test_parse_integrated_decision_mcq():
     assert final_idx == 2
     assert summary == "answer favors option 3"
     assert rationale == "better fit"
+
+
+def test_parse_integrated_decision_mcq_rank_relative_mapping():
+    text = '{"final_choice_index": 1, "integration_summary": "top ranked", "rationale": "fit"}'
+    final_idx, _, _ = parse_integrated_decision_mcq(
+        text,
+        num_options=4,
+        candidate_indices=[3, 1, 2],
+    )
+    assert final_idx == 3
