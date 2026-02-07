@@ -113,6 +113,7 @@ class IterativeRefiner:
        c. Else → Edit response (Editor)
     3. If not compliant by max iterations → return best attempt
     """
+    variant_name: str = "baseline"
     
     def __init__(
         self,
@@ -278,6 +279,15 @@ class IterativeRefiner:
             True if all criteria met
         """
         return critic_result.is_compliant(self.config.clinical_quality_threshold)
+
+    def _get_case_variant_metadata(self) -> Dict[str, Any]:
+        """
+        Return variant-specific metadata for the current case.
+
+        Subclasses can override this to attach routing decisions or other
+        variant artifacts to the trace.
+        """
+        return {}
     
     def refine(
         self,
@@ -402,6 +412,8 @@ class IterativeRefiner:
             checklist_pass_map=checklist_pass_map,
             clinical_quality_score=clinical_quality_score,
             hard_fail=hard_fail,
+            variant_name=self.variant_name,
+            variant_metadata=self._get_case_variant_metadata(),
         )
         
         return trace
@@ -432,6 +444,8 @@ class IterativeRefiner:
             checklist_pass_map={},
             clinical_quality_score=None,
             hard_fail=True,
+            variant_name=self.variant_name,
+            variant_metadata=self._get_case_variant_metadata(),
         )
     
     def _create_format_failure_critic(self) -> CriticResult:

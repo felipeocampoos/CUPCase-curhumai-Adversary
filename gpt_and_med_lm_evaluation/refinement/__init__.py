@@ -10,6 +10,8 @@ This module provides components for:
 """
 
 from .refiner import IterativeRefiner, JudgeProvider, create_client, create_refiner
+from .variant_factory import create_refiner_variant, list_refiner_variants
+from .variants import DomainRoutedRefiner, HeuristicDomainRouter, RouteDecision
 from .schema import (
     DiagnosticResponse,
     ChecklistItem,
@@ -31,6 +33,8 @@ __all__ = [
     "JudgeProvider",
     "create_client",
     "create_refiner",
+    "create_refiner_variant",
+    "list_refiner_variants",
     "DiagnosticResponse",
     "ChecklistItem",
     "CriticResult",
@@ -44,4 +48,7 @@ __all__ = [
     "paired_permutation_test",
     "JSONLLogger",
     "load_refinement_traces",
+    "DomainRoutedRefiner",
+    "HeuristicDomainRouter",
+    "RouteDecision",
 ]

@@ -149,18 +149,56 @@ This will:
 - Save a CSV with BERTScore on `final_diagnosis` (compatible with baseline)
 - Save a JSONL with full refinement traces and metrics
 
+### Variant Framework
+
+The refined evaluator now supports pluggable variants for idea-by-idea experiments.
+
+Available variants:
+- `baseline`: Original Generator -> Critic -> Editor loop
+- `domain_routed`: Domain Routed Prompt Specialization (implemented idea #5)
+
+Run a specific variant:
+
+```bash
+python gpt_free_text_eval_refined.py --variant domain_routed
+```
+
+Or use the dedicated variant script:
+
+```bash
+python gpt_free_text_eval_refined_domain_routed.py
+```
+
 ### Command Line Options
 
 ```bash
 python gpt_free_text_eval_refined.py \
     --input datasets/Case_report_w_images_dis_VF.csv \
     --output-dir output/refined \
+    --variant baseline \
     --model gpt-4o \
     --max-iterations 3 \
     --clinical-threshold 3 \
     --n-batches 4 \
     --batch-size 250
 ```
+
+When `--variant` is not `baseline` and `--output-dir` is left as default,
+the script automatically writes to `output/refined_<variant>`.
+
+### Implemented Variant: Domain Routed Prompt Specialization
+
+`domain_routed` adds a deterministic first-pass specialty classifier and routes
+generation to domain-specific prompt templates.
+
+Current specialty templates:
+- `general_medicine`
+- `oncology`
+- `infectious_disease`
+- `neurology`
+- `cardiology`
+
+The selected domain and routing scores are logged per case in trace metadata.
 
 ### Compare Baseline vs Refined
 
@@ -169,8 +207,8 @@ After running both baseline and refined evaluations, compare them:
 ```bash
 python compare_baseline_vs_refined.py \
     --baseline output/gpt4_free_text_batched.csv \
-    --refined output/refined/gpt4_free_text_refined_*.csv \
-    --refined-traces output/refined/refinement_traces_*.jsonl \
+    --refined output/refined_domain_routed/gpt4_free_text_refined_*.csv \
+    --refined-traces output/refined_domain_routed/refinement_traces_*.jsonl \
     --output output/comparison_report.json
 ```
 
@@ -235,7 +273,7 @@ Generator/Editor outputs strict JSON with these fields:
 
 ```bash
 cd gpt_and_med_lm_evaluation
-pytest tests/test_refinement.py -v
+pytest tests/test_refinement.py tests/test_variants.py -v
 ```
 
 ### Module Structure
@@ -244,15 +282,20 @@ pytest tests/test_refinement.py -v
 refinement/
 ├── __init__.py          # Public API exports
 ├── refiner.py           # Main IterativeRefiner class
+├── variant_factory.py   # Variant registry + factory
 ├── schema.py            # Data classes and JSON parsing
 ├── metrics.py           # CCR and minimality metrics
 ├── stats.py             # Paired bootstrap/permutation tests
 ├── io.py                # JSONL logging utilities
 ├── checklist.yaml       # Configurable checklist
+├── variants/
+│   ├── __init__.py
+│   └── domain_routed.py # Domain routed variant implementation
 └── prompts/
     ├── generator.md     # Generator prompt template
     ├── critic.md        # Critic prompt template
-    └── editor.md        # Editor prompt template
+    ├── editor.md        # Editor prompt template
+    └── domain_routes/   # Domain-specific generator templates
 ```
 
 ### Output Files
@@ -265,6 +308,10 @@ output/refined/
 ├── refinement_traces_TIMESTAMP.jsonl        # Full refinement traces
 └── summary_report_TIMESTAMP.json            # Aggregate metrics
 ```
+
+Each trace now includes:
+- `variant_name`
+- `variant_metadata` (for example routed domain scores)
 
 After running `compare_baseline_vs_refined.py`:
 
