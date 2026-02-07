@@ -5,9 +5,11 @@ from .domain_routed import (
     HeuristicDomainRouter,
     RouteDecision,
 )
+from .semantic_similarity_gated import SemanticSimilarityGatedRefiner
 
 __all__ = [
     "DomainRoutedRefiner",
     "HeuristicDomainRouter",
     "RouteDecision",
+    "SemanticSimilarityGatedRefiner",
 ]

@@ -11,7 +11,12 @@ This module provides components for:
 
 from .refiner import IterativeRefiner, JudgeProvider, create_client, create_refiner
 from .variant_factory import create_refiner_variant, list_refiner_variants
-from .variants import DomainRoutedRefiner, HeuristicDomainRouter, RouteDecision
+from .variants import (
+    DomainRoutedRefiner,
+    HeuristicDomainRouter,
+    RouteDecision,
+    SemanticSimilarityGatedRefiner,
+)
 from .schema import (
     DiagnosticResponse,
     ChecklistItem,
@@ -27,6 +32,14 @@ from .metrics import (
 )
 from .stats import paired_bootstrap_ci, paired_permutation_test
 from .io import JSONLLogger, load_refinement_traces
+from .similarity_gating import (
+    Candidate,
+    CandidateSet,
+    SimilarityResult,
+    DiscriminatorResult,
+    JinaEmbeddingService,
+    compute_similarity_for_top3,
+)
 
 __all__ = [
     "IterativeRefiner",
@@ -49,6 +62,13 @@ __all__ = [
     "JSONLLogger",
     "load_refinement_traces",
     "DomainRoutedRefiner",
+    "SemanticSimilarityGatedRefiner",
     "HeuristicDomainRouter",
     "RouteDecision",
+    "Candidate",
+    "CandidateSet",
+    "SimilarityResult",
+    "DiscriminatorResult",
+    "JinaEmbeddingService",
+    "compute_similarity_for_top3",
 ]

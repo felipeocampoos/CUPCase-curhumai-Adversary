@@ -86,6 +86,12 @@ def parse_args():
         help="Minimum clinical quality score (0-5)",
     )
     parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.65,
+        help="Cosine similarity threshold for semantic_similarity_gated variant",
+    )
+    parser.add_argument(
         "--n-batches",
         type=int,
         default=4,
@@ -277,6 +283,7 @@ def main():
         editor_model=args.model,
         max_iterations=args.max_iterations,
         clinical_quality_threshold=args.clinical_threshold,
+        similarity_threshold=args.similarity_threshold,
     )
     
     # Create refiner variant

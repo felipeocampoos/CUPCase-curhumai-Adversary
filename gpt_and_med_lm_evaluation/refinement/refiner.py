@@ -83,6 +83,7 @@ class RefinerConfig:
     retry_delay: float = 60.0
     api_delay: float = 1.0
     temperature: float = 0.0
+    similarity_threshold: float = 0.65
     checklist_config_path: Optional[Path] = None
     provider: JudgeProvider = JudgeProvider.OPENAI
     
@@ -97,6 +98,7 @@ class RefinerConfig:
             "retry_delay": self.retry_delay,
             "api_delay": self.api_delay,
             "temperature": self.temperature,
+            "similarity_threshold": self.similarity_threshold,
             "provider": self.provider.value,
         }
 

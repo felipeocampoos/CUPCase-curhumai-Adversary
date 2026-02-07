@@ -47,6 +47,14 @@ Run
 gpt_qa_eval.py
 ```
 
+### Multiple-choice evaluation (refined variants)
+
+Used for running baseline or semantic-similarity-gated MCQ evaluation with telemetry.
+Run:
+```bash
+python gpt_qa_eval_refined.py --variant semantic_similarity_gated
+```
+
 ### Open-ended evaluation
 
 Used for evaluation GPT-4o with the open-ended QA in CUPCase.\
@@ -156,6 +164,7 @@ The refined evaluator now supports pluggable variants for idea-by-idea experimen
 Available variants:
 - `baseline`: Original Generator -> Critic -> Editor loop
 - `domain_routed`: Domain Routed Prompt Specialization (implemented idea #5)
+- `semantic_similarity_gated`: Semantic Similarity Gated Differential Reasoning (implemented idea #2)
 
 Run a specific variant:
 
@@ -169,6 +178,18 @@ Or use the dedicated variant script:
 python gpt_free_text_eval_refined_domain_routed.py
 ```
 
+Semantic-similarity variant:
+
+```bash
+python gpt_free_text_eval_refined.py --variant semantic_similarity_gated
+```
+
+Or use the dedicated wrapper:
+
+```bash
+python gpt_free_text_eval_refined_semantic_similarity.py
+```
+
 ### Command Line Options
 
 ```bash
@@ -179,6 +200,7 @@ python gpt_free_text_eval_refined.py \
     --model gpt-4o \
     --max-iterations 3 \
     --clinical-threshold 3 \
+    --similarity-threshold 0.65 \
     --n-batches 4 \
     --batch-size 250
 ```
@@ -199,6 +221,23 @@ Current specialty templates:
 - `cardiology`
 
 The selected domain and routing scores are logged per case in trace metadata.
+
+### Implemented Variant: Semantic Similarity Gated Differential Reasoning
+
+`semantic_similarity_gated` runs an additional discriminator pass only when the
+model's top-3 candidates are semantically clustered.
+
+Flow:
+- Candidate pass generates model-ranked top-3 diagnoses
+- Pairwise cosine similarity is computed with JINA embeddings (`jinaai/jina-embeddings-v2-base-en`)
+- If mean pairwise cosine is `>= 0.65`, discriminator reasoning is invoked
+- Final response includes explicit differentiators in `conditional_reasoning`
+
+Per-case telemetry (in `variant_metadata`) includes:
+- candidate top-3 and confidences
+- pairwise cosine matrix and mean cosine
+- gate trigger flag
+- discriminator rationale and differentiators
 
 ### Compare Baseline vs Refined
 
@@ -273,7 +312,7 @@ Generator/Editor outputs strict JSON with these fields:
 
 ```bash
 cd gpt_and_med_lm_evaluation
-pytest tests/test_refinement.py tests/test_variants.py -v
+pytest tests/test_refinement.py tests/test_variants.py tests/test_similarity_gating.py tests/test_domain_routed_wrapper.py tests/test_semantic_wrapper.py tests/test_qa_refined.py -v
 ```
 
 ### Module Structure
@@ -283,6 +322,7 @@ refinement/
 ├── __init__.py          # Public API exports
 ├── refiner.py           # Main IterativeRefiner class
 ├── variant_factory.py   # Variant registry + factory
+├── similarity_gating.py # Shared candidate similarity gate core
 ├── schema.py            # Data classes and JSON parsing
 ├── metrics.py           # CCR and minimality metrics
 ├── stats.py             # Paired bootstrap/permutation tests
@@ -290,12 +330,16 @@ refinement/
 ├── checklist.yaml       # Configurable checklist
 ├── variants/
 │   ├── __init__.py
-│   └── domain_routed.py # Domain routed variant implementation
+│   ├── domain_routed.py             # Domain routed variant implementation
+│   └── semantic_similarity_gated.py # Similarity-gated variant implementation
 └── prompts/
     ├── generator.md     # Generator prompt template
     ├── critic.md        # Critic prompt template
     ├── editor.md        # Editor prompt template
-    └── domain_routes/   # Domain-specific generator templates
+    ├── domain_routes/   # Domain-specific generator templates
+    └── semantic_similarity/
+        ├── candidate_free_text.md
+        └── discriminator_free_text.md
 ```
 
 ### Output Files
@@ -358,3 +402,27 @@ python gpt_free_text_eval_refined.py \
   --n-batches 1 \
   --batch-size 250
 ```
+
+## MCQ Refined Evaluation
+
+Use the new MCQ refined runner for baseline or similarity-gated evaluation:
+
+```bash
+python gpt_qa_eval_refined.py \
+  --variant semantic_similarity_gated \
+  --input ablation_study_tokens.csv \
+  --output output/gpt4_multiple_choice_refined.csv \
+  --model gpt-4o \
+  --n-batches 4 \
+  --batch-size 250
+```
+
+Additional MCQ output columns:
+- `Variant`
+- `Gate Triggered`
+- `Mean Cosine`
+- `Pairwise Cosine JSON`
+- `Candidate Top3`
+- `Candidate Rationale`
+- `Discriminator Rationale`
+- `Differentiators JSON`
