@@ -49,10 +49,10 @@ gpt_qa_eval.py
 
 ### Multiple-choice evaluation (refined variants)
 
-Used for running baseline or semantic-similarity-gated MCQ evaluation with telemetry.
+Used for running baseline, semantic-similarity-gated, or discriminative-question MCQ evaluation with telemetry.
 Run:
 ```bash
-python gpt_qa_eval_refined.py --variant semantic_similarity_gated
+python gpt_qa_eval_refined.py --variant discriminative_question
 ```
 
 ### Open-ended evaluation
@@ -165,6 +165,7 @@ Available variants:
 - `baseline`: Original Generator -> Critic -> Editor loop
 - `domain_routed`: Domain Routed Prompt Specialization (implemented idea #5)
 - `semantic_similarity_gated`: Semantic Similarity Gated Differential Reasoning (implemented idea #2)
+- `discriminative_question`: Self Generated Discriminative Questions with Answer Integration (implemented idea #4)
 
 Run a specific variant:
 
@@ -188,6 +189,18 @@ Or use the dedicated wrapper:
 
 ```bash
 python gpt_free_text_eval_refined_semantic_similarity.py
+```
+
+Discriminative-question variant:
+
+```bash
+python gpt_free_text_eval_refined.py --variant discriminative_question
+```
+
+Or use the dedicated wrapper:
+
+```bash
+python gpt_free_text_eval_refined_discriminative_question.py
 ```
 
 ### Command Line Options
@@ -238,6 +251,20 @@ Per-case telemetry (in `variant_metadata`) includes:
 - pairwise cosine matrix and mean cosine
 - gate trigger flag
 - discriminator rationale and differentiators
+
+### Implemented Variant: Self Generated Discriminative Questions with Answer Integration
+
+`discriminative_question` forces the model to actively resolve top-2 ambiguity:
+- Generate ranked candidates
+- Generate exactly one discriminative question targeting a concrete variable
+- Re-scan the case and extract grounded answer + evidence snippets
+- Integrate that answer explicitly into final diagnostic reasoning and choice
+
+Per-case telemetry (in `variant_metadata`) includes:
+- discriminative question and target variable
+- extracted answer and confidence
+- evidence spans used for re-integration
+- integration summary and final selection source
 
 ### Compare Baseline vs Refined
 
@@ -312,7 +339,7 @@ Generator/Editor outputs strict JSON with these fields:
 
 ```bash
 cd gpt_and_med_lm_evaluation
-pytest tests/test_refinement.py tests/test_variants.py tests/test_similarity_gating.py tests/test_domain_routed_wrapper.py tests/test_semantic_wrapper.py tests/test_qa_refined.py -v
+pytest tests/test_refinement.py tests/test_variants.py tests/test_similarity_gating.py tests/test_discriminative_questioning.py tests/test_domain_routed_wrapper.py tests/test_semantic_wrapper.py tests/test_discriminative_wrapper.py tests/test_qa_refined.py -v
 ```
 
 ### Module Structure
@@ -322,6 +349,7 @@ refinement/
 ├── __init__.py          # Public API exports
 ├── refiner.py           # Main IterativeRefiner class
 ├── variant_factory.py   # Variant registry + factory
+├── discriminative_questioning.py # Shared question-answer integration core
 ├── similarity_gating.py # Shared candidate similarity gate core
 ├── schema.py            # Data classes and JSON parsing
 ├── metrics.py           # CCR and minimality metrics
@@ -331,12 +359,18 @@ refinement/
 ├── variants/
 │   ├── __init__.py
 │   ├── domain_routed.py             # Domain routed variant implementation
-│   └── semantic_similarity_gated.py # Similarity-gated variant implementation
+│   ├── semantic_similarity_gated.py # Similarity-gated variant implementation
+│   └── discriminative_question.py   # Discriminative-question variant implementation
 └── prompts/
     ├── generator.md     # Generator prompt template
     ├── critic.md        # Critic prompt template
     ├── editor.md        # Editor prompt template
     ├── domain_routes/   # Domain-specific generator templates
+    ├── discriminative_question/
+    │   ├── candidate_free_text.md
+    │   ├── question_free_text.md
+    │   ├── answer_extraction_free_text.md
+    │   └── integrate_free_text.md
     └── semantic_similarity/
         ├── candidate_free_text.md
         └── discriminator_free_text.md
@@ -405,11 +439,11 @@ python gpt_free_text_eval_refined.py \
 
 ## MCQ Refined Evaluation
 
-Use the new MCQ refined runner for baseline or similarity-gated evaluation:
+Use the new MCQ refined runner for baseline, similarity-gated, or discriminative-question evaluation:
 
 ```bash
 python gpt_qa_eval_refined.py \
-  --variant semantic_similarity_gated \
+  --variant discriminative_question \
   --input ablation_study_tokens.csv \
   --output output/gpt4_multiple_choice_refined.csv \
   --model gpt-4o \
@@ -424,5 +458,11 @@ Additional MCQ output columns:
 - `Pairwise Cosine JSON`
 - `Candidate Top3`
 - `Candidate Rationale`
+- `Discriminative Question`
+- `Question Target Variable`
+- `Extracted Answer`
+- `Answer Confidence`
+- `Evidence Spans JSON`
+- `Integration Summary`
 - `Discriminator Rationale`
 - `Differentiators JSON`

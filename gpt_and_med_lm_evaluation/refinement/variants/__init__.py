@@ -6,10 +6,12 @@ from .domain_routed import (
     RouteDecision,
 )
 from .semantic_similarity_gated import SemanticSimilarityGatedRefiner
+from .discriminative_question import DiscriminativeQuestionRefiner
 
 __all__ = [
     "DomainRoutedRefiner",
     "HeuristicDomainRouter",
     "RouteDecision",
     "SemanticSimilarityGatedRefiner",
+    "DiscriminativeQuestionRefiner",
 ]

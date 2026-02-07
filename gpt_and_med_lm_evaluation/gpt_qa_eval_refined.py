@@ -1,4 +1,4 @@
-"""MCQ evaluation with optional semantic similarity gated reasoning."""
+"""MCQ evaluation with baseline, similarity-gated, and discriminative-question variants."""
 
 from __future__ import annotations
 
@@ -14,6 +14,13 @@ import pandas as pd
 
 from refinement.refiner import JudgeProvider, create_client
 from refinement.schema import extract_json_from_response
+from refinement.discriminative_questioning import (
+    format_evidence_for_prompt,
+    parse_answer_extraction,
+    parse_discriminative_question,
+    parse_integrated_decision_mcq,
+    parse_ranked_option_indices,
+)
 from refinement.similarity_gating import (
     JinaEmbeddingService,
     compute_similarity_for_top3,
@@ -23,7 +30,7 @@ from refinement.similarity_gating import (
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-VALID_VARIANTS = ["baseline", "semantic_similarity_gated"]
+VALID_VARIANTS = ["baseline", "semantic_similarity_gated", "discriminative_question"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,8 +50,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_prompt_template(name: str) -> str:
-    prompts_dir = Path(__file__).parent / "prompts" / "semantic_similarity"
+def load_prompt_template(folder: str, name: str) -> str:
+    prompts_dir = Path(__file__).parent / "prompts" / folder
     path = prompts_dir / f"{name}.md"
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
@@ -277,6 +284,138 @@ def evaluate_case_semantic_similarity(
         return ranked_indices[0], telemetry
 
 
+def evaluate_case_discriminative_question(
+    client,
+    model: str,
+    case_text: str,
+    options: Sequence[str],
+    candidate_prompt_template: str,
+    question_prompt_template: str,
+    answer_prompt_template: str,
+    integration_prompt_template: str,
+    retry_attempts: int,
+    retry_delay: float,
+) -> Tuple[int, Dict[str, Any]]:
+    options_text = "\n".join(f"{i+1}. {option}" for i, option in enumerate(options))
+
+    telemetry: Dict[str, Any] = {
+        "variant": "discriminative_question",
+        "candidate_top3": [],
+        "candidate_rationale": "",
+        "discriminative_question": "",
+        "question_target_variable": "",
+        "extracted_answer": "",
+        "answer_confidence": None,
+        "evidence_spans": [],
+        "integration_summary": "",
+    }
+
+    candidate_prompt = candidate_prompt_template.replace(
+        "{options_text}", options_text
+    ).replace(
+        "{case_text}", case_text
+    )
+
+    try:
+        raw_candidate = call_model(
+            client,
+            model,
+            candidate_prompt,
+            retry_attempts,
+            retry_delay,
+        )
+        ranked_indices, candidate_rationale = parse_ranked_option_indices(
+            raw_candidate,
+            len(options),
+        )
+        telemetry["candidate_top3"] = ranked_indices[:3]
+        telemetry["candidate_rationale"] = candidate_rationale
+    except Exception as exc:
+        telemetry["candidate_error"] = str(exc)
+        return -1, telemetry
+
+    top2 = ranked_indices[:2]
+    candidate_block = "\n".join(
+        f"{rank+1}. option {idx+1}: {options[idx]}"
+        for rank, idx in enumerate(top2)
+    )
+
+    question_prompt = question_prompt_template.replace(
+        "{candidate_block}", candidate_block
+    ).replace(
+        "{case_text}", case_text
+    )
+    try:
+        raw_question = call_model(
+            client,
+            model,
+            question_prompt,
+            retry_attempts,
+            retry_delay,
+        )
+        question = parse_discriminative_question(raw_question)
+        telemetry["discriminative_question"] = question.question
+        telemetry["question_target_variable"] = question.target_variable
+    except Exception as exc:
+        telemetry["question_error"] = str(exc)
+        return ranked_indices[0], telemetry
+
+    answer_prompt = answer_prompt_template.replace(
+        "{question}", question.question
+    ).replace(
+        "{target_variable}", question.target_variable
+    ).replace(
+        "{case_text}", case_text
+    )
+    try:
+        raw_answer = call_model(
+            client,
+            model,
+            answer_prompt,
+            retry_attempts,
+            retry_delay,
+        )
+        answer = parse_answer_extraction(raw_answer)
+        telemetry["extracted_answer"] = answer.answer
+        telemetry["answer_confidence"] = answer.confidence
+        telemetry["evidence_spans"] = answer.evidence_spans
+    except Exception as exc:
+        telemetry["answer_error"] = str(exc)
+        return ranked_indices[0], telemetry
+
+    integration_prompt = integration_prompt_template.replace(
+        "{candidate_block}",
+        "\n".join(
+            f"{rank+1}. option {idx+1}: {options[idx]}"
+            for rank, idx in enumerate(ranked_indices[:3])
+        ),
+    ).replace(
+        "{question}", question.question
+    ).replace(
+        "{answer_block}", format_evidence_for_prompt(answer)
+    ).replace(
+        "{case_text}", case_text
+    )
+    try:
+        raw_integration = call_model(
+            client,
+            model,
+            integration_prompt,
+            retry_attempts,
+            retry_delay,
+        )
+        final_choice, integration_summary, rationale = parse_integrated_decision_mcq(
+            raw_integration,
+            len(options),
+        )
+        telemetry["integration_summary"] = integration_summary
+        telemetry["discriminator_rationale"] = rationale
+        return final_choice, telemetry
+    except Exception as exc:
+        telemetry["integration_error"] = str(exc)
+        return ranked_indices[0], telemetry
+
+
 def process_batch(
     batch: pd.DataFrame,
     args: argparse.Namespace,
@@ -284,6 +423,9 @@ def process_batch(
     embedding_service: JinaEmbeddingService,
     candidate_prompt_template: str,
     discriminator_prompt_template: str,
+    question_prompt_template: str,
+    answer_prompt_template: str,
+    integration_prompt_template: str,
     random_seed: int,
 ) -> List[Dict[str, Any]]:
     results = []
@@ -317,6 +459,19 @@ def process_batch(
                 retry_attempts=args.retry_attempts,
                 retry_delay=args.retry_delay,
             )
+        elif args.variant == "discriminative_question":
+            predicted_index, telemetry = evaluate_case_discriminative_question(
+                client=client,
+                model=args.model,
+                case_text=case_text,
+                options=options,
+                candidate_prompt_template=candidate_prompt_template,
+                question_prompt_template=question_prompt_template,
+                answer_prompt_template=answer_prompt_template,
+                integration_prompt_template=integration_prompt_template,
+                retry_attempts=args.retry_attempts,
+                retry_delay=args.retry_delay,
+            )
         else:
             predicted_index, telemetry = evaluate_case_baseline(
                 client=client,
@@ -343,10 +498,19 @@ def process_batch(
                 "Pairwise Cosine JSON": json.dumps(telemetry.get("pairwise_cosine", {})),
                 "Candidate Top3": json.dumps(telemetry.get("candidate_top3", [])),
                 "Candidate Rationale": telemetry.get("candidate_rationale", ""),
+                "Discriminative Question": telemetry.get("discriminative_question", ""),
+                "Question Target Variable": telemetry.get("question_target_variable", ""),
+                "Extracted Answer": telemetry.get("extracted_answer", ""),
+                "Answer Confidence": telemetry.get("answer_confidence"),
+                "Evidence Spans JSON": json.dumps(telemetry.get("evidence_spans", [])),
+                "Integration Summary": telemetry.get("integration_summary", ""),
                 "Discriminator Rationale": telemetry.get("discriminator_rationale", ""),
                 "Differentiators JSON": json.dumps(telemetry.get("differentiators", [])),
                 "Error": telemetry.get("candidate_error")
                 or telemetry.get("similarity_error")
+                or telemetry.get("question_error")
+                or telemetry.get("answer_error")
+                or telemetry.get("integration_error")
                 or telemetry.get("discriminator_error")
                 or "",
             }
@@ -365,8 +529,21 @@ def main() -> None:
     client = create_client(provider=provider)
     embedding_service = JinaEmbeddingService()
 
-    candidate_prompt_template = load_prompt_template("candidate_mcq")
-    discriminator_prompt_template = load_prompt_template("discriminator_mcq")
+    if args.variant == "semantic_similarity_gated":
+        prompt_folder = "semantic_similarity"
+    elif args.variant == "discriminative_question":
+        prompt_folder = "discriminative_question"
+    else:
+        prompt_folder = "semantic_similarity"
+
+    candidate_prompt_template = load_prompt_template(prompt_folder, "candidate_mcq")
+    discriminator_prompt_template = load_prompt_template(
+        "semantic_similarity",
+        "discriminator_mcq",
+    )
+    question_prompt_template = load_prompt_template(prompt_folder, "question_mcq") if args.variant == "discriminative_question" else ""
+    answer_prompt_template = load_prompt_template(prompt_folder, "answer_extraction_mcq") if args.variant == "discriminative_question" else ""
+    integration_prompt_template = load_prompt_template(prompt_folder, "integrate_mcq") if args.variant == "discriminative_question" else ""
 
     all_results: List[Dict[str, Any]] = []
 
@@ -381,6 +558,9 @@ def main() -> None:
             embedding_service=embedding_service,
             candidate_prompt_template=candidate_prompt_template,
             discriminator_prompt_template=discriminator_prompt_template,
+            question_prompt_template=question_prompt_template,
+            answer_prompt_template=answer_prompt_template,
+            integration_prompt_template=integration_prompt_template,
             random_seed=args.random_seed + batch_num,
         )
         all_results.extend(batch_results)

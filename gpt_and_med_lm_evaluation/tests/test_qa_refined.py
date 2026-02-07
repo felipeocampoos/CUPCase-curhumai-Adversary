@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from gpt_qa_eval_refined import (
+    VALID_VARIANTS,
     extract_distractors,
     parse_discriminator_choice,
     parse_predicted_index,
@@ -54,3 +55,7 @@ def test_extract_distractors_prefers_unique_values():
     )
     distractors = extract_distractors(row, true_diagnosis="Dx A")
     assert distractors == ["Dx B", "Dx C", "Dx D"]
+
+
+def test_valid_variants_include_discriminative_question():
+    assert "discriminative_question" in VALID_VARIANTS

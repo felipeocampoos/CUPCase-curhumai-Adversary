@@ -12,6 +12,7 @@ This module provides components for:
 from .refiner import IterativeRefiner, JudgeProvider, create_client, create_refiner
 from .variant_factory import create_refiner_variant, list_refiner_variants
 from .variants import (
+    DiscriminativeQuestionRefiner,
     DomainRoutedRefiner,
     HeuristicDomainRouter,
     RouteDecision,
@@ -40,6 +41,18 @@ from .similarity_gating import (
     JinaEmbeddingService,
     compute_similarity_for_top3,
 )
+from .discriminative_questioning import (
+    RankedCandidate,
+    RankedCandidateSet,
+    DiscriminativeQuestion,
+    QuestionAnswerEvidence,
+    IntegratedDecision,
+    FreeTextIntegratedOutput,
+    parse_ranked_candidates,
+    parse_discriminative_question,
+    parse_answer_extraction,
+    parse_integrated_decision_free_text,
+)
 
 __all__ = [
     "IterativeRefiner",
@@ -62,6 +75,7 @@ __all__ = [
     "JSONLLogger",
     "load_refinement_traces",
     "DomainRoutedRefiner",
+    "DiscriminativeQuestionRefiner",
     "SemanticSimilarityGatedRefiner",
     "HeuristicDomainRouter",
     "RouteDecision",
@@ -71,4 +85,14 @@ __all__ = [
     "DiscriminatorResult",
     "JinaEmbeddingService",
     "compute_similarity_for_top3",
+    "RankedCandidate",
+    "RankedCandidateSet",
+    "DiscriminativeQuestion",
+    "QuestionAnswerEvidence",
+    "IntegratedDecision",
+    "FreeTextIntegratedOutput",
+    "parse_ranked_candidates",
+    "parse_discriminative_question",
+    "parse_answer_extraction",
+    "parse_integrated_decision_free_text",
 ]

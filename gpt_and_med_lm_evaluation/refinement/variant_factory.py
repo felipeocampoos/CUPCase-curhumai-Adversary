@@ -8,13 +8,18 @@ from .refiner import (
     JudgeProvider,
     create_client,
 )
-from .variants import DomainRoutedRefiner, SemanticSimilarityGatedRefiner
+from .variants import (
+    DiscriminativeQuestionRefiner,
+    DomainRoutedRefiner,
+    SemanticSimilarityGatedRefiner,
+)
 
 
 VARIANT_REGISTRY: Dict[str, Type[IterativeRefiner]] = {
     "baseline": IterativeRefiner,
     "domain_routed": DomainRoutedRefiner,
     "semantic_similarity_gated": SemanticSimilarityGatedRefiner,
+    "discriminative_question": DiscriminativeQuestionRefiner,
 }
 
 

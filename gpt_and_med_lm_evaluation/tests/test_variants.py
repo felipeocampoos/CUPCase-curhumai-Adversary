@@ -19,6 +19,7 @@ from refinement.variants.domain_routed import (
     HeuristicDomainRouter,
 )
 from refinement.variants.semantic_similarity_gated import SemanticSimilarityGatedRefiner
+from refinement.variants.discriminative_question import DiscriminativeQuestionRefiner
 from refinement.similarity_gating import (
     Candidate,
     CandidateSet,
@@ -28,6 +29,18 @@ from refinement.similarity_gating import (
     parse_free_text_discriminator_output,
 )
 from refinement.schema import parse_diagnostic_response
+from refinement.discriminative_questioning import (
+    FreeTextIntegratedOutput,
+    IntegratedDecision,
+    QuestionAnswerEvidence,
+    DiscriminativeQuestion,
+    RankedCandidateSet,
+    RankedCandidate,
+    parse_answer_extraction,
+    parse_discriminative_question,
+    parse_integrated_decision_free_text,
+    parse_ranked_candidates,
+)
 
 
 class _FakeEmbeddingServiceHighSimilarity:
@@ -79,6 +92,7 @@ def test_list_refiner_variants_contains_expected_entries():
     assert "baseline" in variants
     assert "domain_routed" in variants
     assert "semantic_similarity_gated" in variants
+    assert "discriminative_question" in variants
 
 
 def test_create_refiner_variant_domain_routed():
@@ -97,6 +111,15 @@ def test_create_refiner_variant_semantic_similarity_gated():
         config=RefinerConfig(),
     )
     assert isinstance(refiner, SemanticSimilarityGatedRefiner)
+
+
+def test_create_refiner_variant_discriminative_question():
+    refiner = create_refiner_variant(
+        variant="discriminative_question",
+        api_key="test-key",
+        config=RefinerConfig(),
+    )
+    assert isinstance(refiner, DiscriminativeQuestionRefiner)
 
 
 def test_heuristic_router_routes_oncology_case():
@@ -241,3 +264,95 @@ def test_semantic_similarity_variant_invokes_discriminator_when_gated(monkeypatc
     assert metadata["gate_triggered"] is True
     assert metadata["discriminator_invoked"] is True
     assert metadata["final_selection_source"] == "discriminator_pass"
+
+
+def test_discriminative_question_variant_happy_path(monkeypatch):
+    refiner = DiscriminativeQuestionRefiner(client=object(), config=RefinerConfig())
+
+    ranked = RankedCandidateSet(
+        candidates=[
+            RankedCandidate(label="Cardiac cause", confidence=0.55),
+            RankedCandidate(label="Pulmonary cause", confidence=0.35),
+            RankedCandidate(label="Other", confidence=0.10),
+        ],
+        raw_response="{}",
+    )
+    question = DiscriminativeQuestion(
+        question="Is there orthopnea?",
+        target_variable="orthopnea",
+        rationale="Distinguishes cardiac vs pulmonary pattern",
+        raw_response="{}",
+    )
+    answer = QuestionAnswerEvidence(
+        answer="yes",
+        confidence=0.82,
+        evidence_spans=["patient reports orthopnea at night"],
+        rationale="Direct mention in case",
+        raw_response="{}",
+    )
+    integrated = FreeTextIntegratedOutput(
+        response=DiagnosticResponse(
+            final_diagnosis="Heart failure exacerbation",
+            conditional_reasoning="Orthopnea supports cardiac etiology",
+            next_steps=["BNP", "Echo"],
+        ),
+        decision=IntegratedDecision(
+            final_choice="Heart failure exacerbation",
+            integration_summary="Orthopnea shifted confidence to cardiac cause",
+            rationale="Answer integration favors cardiac differential",
+            raw_response="{}",
+        ),
+    )
+
+    def fake_call_api(model, prompt, parse_fn):
+        if parse_fn is parse_ranked_candidates:
+            return ranked, "{}"
+        if parse_fn is parse_discriminative_question:
+            return question, "{}"
+        if parse_fn is parse_answer_extraction:
+            return answer, "{}"
+        if parse_fn is parse_integrated_decision_free_text:
+            return integrated, "{}"
+        raise AssertionError("Unexpected parse function")
+
+    monkeypatch.setattr(refiner, "_call_api", fake_call_api)
+    response, _ = refiner.generate("Case text")
+
+    assert response.final_diagnosis == "Heart failure exacerbation"
+    metadata = refiner._get_case_variant_metadata()
+    assert metadata["discriminative_question"] == "Is there orthopnea?"
+    assert metadata["extracted_answer"] == "yes"
+    assert metadata["final_selection_source"] == "discriminative_integration"
+
+
+def test_discriminative_question_variant_fallback_on_question_error(monkeypatch):
+    refiner = DiscriminativeQuestionRefiner(client=object(), config=RefinerConfig())
+
+    ranked = RankedCandidateSet(
+        candidates=[
+            RankedCandidate(label="Dx A", confidence=0.7),
+            RankedCandidate(label="Dx B", confidence=0.2),
+            RankedCandidate(label="Dx C", confidence=0.1),
+        ],
+        raw_response="{}",
+    )
+
+    def fake_call_api(model, prompt, parse_fn):
+        if parse_fn is parse_ranked_candidates:
+            return ranked, "{}"
+        if parse_fn is parse_discriminative_question:
+            raise ValueError("question parse failed")
+        if parse_fn is parse_diagnostic_response:
+            return DiagnosticResponse(
+                final_diagnosis="Fallback diagnosis",
+                next_steps=["step"],
+            ), "{}"
+        raise AssertionError("Unexpected parse function")
+
+    monkeypatch.setattr(refiner, "_call_api", fake_call_api)
+    response, _ = refiner.generate("Case text")
+
+    assert response.final_diagnosis == "Fallback diagnosis"
+    metadata = refiner._get_case_variant_metadata()
+    assert "question_error" in metadata
+    assert metadata["final_selection_source"] == "baseline_fallback_question_error"
