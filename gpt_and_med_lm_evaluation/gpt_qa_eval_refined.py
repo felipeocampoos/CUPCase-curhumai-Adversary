@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -107,12 +108,48 @@ def parse_predicted_index(text: str, num_options: int) -> int:
     if not stripped:
         return -1
 
-    for char in stripped:
-        if char.isdigit():
-            idx = int(char) - 1
-            if 0 <= idx < num_options:
-                return idx
-            return -1
+    # Prefer structured extraction when present in JSON-style model outputs.
+    try:
+        data = extract_json_from_response(stripped)
+        for key in (
+            "final_choice_index",
+            "choice_index",
+            "selected_option_index",
+            "predicted_index",
+            "answer_index",
+            "option_index",
+            "answer",
+            "choice",
+        ):
+            if key in data:
+                idx = int(data[key]) - 1
+                if 0 <= idx < num_options:
+                    return idx
+    except (ValueError, TypeError, KeyError):
+        pass
+
+    # Then prefer explicit option-selection patterns in free-form text.
+    explicit_matches: List[str] = []
+    for pattern in (
+        r"(?:option|choice|answer|index|selected)\s*[:#=\-\s]*\(?\s*(\d+)\s*\)?",
+        r"\b(?:is|was)\s*(\d+)\b",
+    ):
+        explicit_matches.extend(re.findall(pattern, stripped, flags=re.IGNORECASE))
+
+    for match in reversed(explicit_matches):
+        idx = int(match) - 1
+        if 0 <= idx < num_options:
+            return idx
+
+    # Fallback: scan standalone numeric tokens and use the last valid candidate.
+    valid_indices: List[int] = []
+    for match in re.finditer(r"(?<!\d)(\d+)(?!\d)", stripped):
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < num_options:
+            valid_indices.append(idx)
+    if valid_indices:
+        return valid_indices[-1]
+
     return -1
 
 

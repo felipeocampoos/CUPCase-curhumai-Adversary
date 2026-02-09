@@ -33,6 +33,14 @@ def test_parse_early_ranked_option_indices_mcq():
     assert parsed.confidences[0] == 0.55
 
 
+def test_parse_early_ranked_option_indices_mcq_rejects_duplicates():
+    try:
+        parse_early_ranked_option_indices_mcq('{"ranked_indices":[1,1]}', 4)
+        assert False, "Expected ValueError for duplicate ranked indices"
+    except ValueError as exc:
+        assert "unique" in str(exc)
+
+
 def test_parse_revision_decision_free_text():
     parsed = parse_revision_decision_free_text(
         '{"response":{"final_diagnosis":"Dx B","next_steps":["step"]},"final_choice":"Dx B","final_confidence":0.7,"revision_summary":"changed","kept_hypotheses":["Dx A"],"dropped_hypotheses":["Dx C"],"added_hypotheses":["Dx B"],"contradiction_found":true,"rationale":"full case"}'

@@ -125,6 +125,8 @@ def parse_early_ranked_option_indices_mcq(text: str, num_options: int) -> EarlyR
             raise ValueError(f"ranked index out of range: {item}")
         if idx not in parsed:
             parsed.append(idx)
+    if len(parsed) < 2:
+        raise ValueError("ranked_indices must contain at least 2 unique entries")
 
     confidences_raw = data.get("confidences", [])
     confidences: List[float] = []

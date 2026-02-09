@@ -20,6 +20,16 @@ def test_parse_predicted_index_invalid():
     assert parse_predicted_index("x", 4) == -1
 
 
+def test_parse_predicted_index_ignores_incidental_numbers():
+    text = "This 53-year-old patient is most consistent with option 2."
+    assert parse_predicted_index(text, 4) == 1
+
+
+def test_parse_predicted_index_from_structured_output():
+    text = '{"final_choice_index": 4, "rationale": "best fit"}'
+    assert parse_predicted_index(text, 4) == 3
+
+
 def test_parse_ranked_indices_json():
     indices, rationale = parse_ranked_indices(
         '{"ranked_indices": [2, 4, 1], "rationale": "test"}',
