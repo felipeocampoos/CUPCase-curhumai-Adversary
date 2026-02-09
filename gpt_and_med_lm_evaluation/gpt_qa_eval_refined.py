@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", type=str, default="ablation_study_tokens.csv")
     parser.add_argument("--output", type=str, default="output/gpt4_multiple_choice_refined.csv")
     parser.add_argument("--variant", type=str, default="baseline", choices=VALID_VARIANTS)
-    parser.add_argument("--model", type=str, default="gpt-4o")
+    parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--provider", type=str, default="openai", choices=["openai", "deepseek"])
     parser.add_argument("--n-batches", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=250)
@@ -63,7 +63,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-attempts", type=int, default=3)
     parser.add_argument("--retry-delay", type=float, default=60.0)
     parser.add_argument("--api-delay", type=float, default=1.0)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.model is None:
+        args.model = JudgeProvider(args.provider).default_model
+    return args
 
 
 def load_prompt_template(folder: str, name: str) -> str:

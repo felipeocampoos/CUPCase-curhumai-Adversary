@@ -6,6 +6,7 @@ import pytest
 from gpt_qa_eval_refined import (
     VALID_VARIANTS,
     extract_distractors,
+    parse_args,
     parse_discriminator_choice,
     parse_predicted_index,
     parse_ranked_indices,
@@ -95,3 +96,21 @@ def test_valid_variants_include_discriminative_question():
 
 def test_valid_variants_include_progressive_disclosure():
     assert "progressive_disclosure" in VALID_VARIANTS
+
+
+def test_parse_args_uses_provider_default_model_for_deepseek(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["prog", "--provider", "deepseek"],
+    )
+    args = parse_args()
+    assert args.model == "deepseek-chat"
+
+
+def test_parse_args_preserves_explicit_model(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["prog", "--provider", "deepseek", "--model", "custom-model"],
+    )
+    args = parse_args()
+    assert args.model == "custom-model"

@@ -421,6 +421,64 @@ def test_progressive_disclosure_variant_happy_path(monkeypatch):
     assert "belief_penalty_score" in metadata
 
 
+def test_progressive_disclosure_variant_applies_thresholds_to_penalty(monkeypatch):
+    refiner = ProgressiveDisclosureRefiner(
+        client=object(),
+        config=RefinerConfig(
+            early_confidence_threshold=0.8,
+            revision_instability_threshold=0.5,
+        ),
+    )
+
+    early = EarlyDifferential(
+        candidates=[
+            EarlyCandidate(label="Dx A", confidence=0.6, rationale="early support"),
+            EarlyCandidate(label="Dx B", confidence=0.3, rationale="less likely"),
+        ],
+        raw_response="{}",
+    )
+    revision = RevisionDecisionFreeText(
+        response=DiagnosticResponse(
+            final_diagnosis="Dx B",
+            conditional_reasoning="full case revised diagnosis",
+            next_steps=["step"],
+        ),
+        final_choice="Dx B",
+        final_confidence=0.61,
+        revision_summary="changed",
+        kept_hypotheses=[],
+        dropped_hypotheses=["Dx A"],
+        added_hypotheses=["Dx B"],
+        contradiction_found=False,
+        rationale="contradictory evidence in full case",
+        raw_response="{}",
+    )
+
+    def fake_call_api(model, prompt, parse_fn):
+        if parse_fn is parse_early_differential_free_text:
+            return early, "{}"
+        if parse_fn is parse_revision_decision_free_text:
+            return revision, "{}"
+        raise AssertionError("Unexpected parse function")
+
+    monkeypatch.setattr(refiner, "_call_api", fake_call_api)
+    monkeypatch.setattr(
+        "refinement.variants.progressive_disclosure.compute_belief_revision_scores",
+        lambda **kwargs: BeliefRevisionScores(
+            anchoring_flag=False,
+            confidence_instability_score=0.9,
+            revision_delta=1.0,
+            penalty_score=0.99,
+        ),
+    )
+
+    refiner.generate("Case text with enough tokens to split")
+    metadata = refiner._get_case_variant_metadata()
+
+    assert metadata["confidence_instability_score"] == 0.0
+    assert metadata["belief_penalty_score"] == 0.2
+
+
 def test_progressive_disclosure_variant_fallback_on_revision_error(monkeypatch):
     refiner = ProgressiveDisclosureRefiner(client=object(), config=RefinerConfig())
 

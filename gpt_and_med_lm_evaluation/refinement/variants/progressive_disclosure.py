@@ -84,6 +84,14 @@ class ProgressiveDisclosureRefiner(IterativeRefiner):
             contradiction_found=revision_decision.contradiction_found,
             kept_labels=revision_decision.kept_hypotheses,
         )
+        instability = scores.confidence_instability_score
+        if instability < self.config.revision_instability_threshold:
+            instability = 0.0
+        if top1.confidence < self.config.early_confidence_threshold:
+            instability = 0.0
+        unexplained_revision = 1.0 if (scores.revision_delta >= 1.0 and not revision_decision.contradiction_found) else 0.0
+        penalty = (0.5 * float(scores.anchoring_flag)) + (0.3 * instability) + (0.2 * unexplained_revision)
+        penalty = max(0.0, min(1.0, penalty))
 
         self._case_telemetry["final_candidate"] = revision_decision.final_choice
         self._case_telemetry["final_confidence"] = revision_decision.final_confidence
@@ -94,9 +102,9 @@ class ProgressiveDisclosureRefiner(IterativeRefiner):
         self._case_telemetry["contradiction_found"] = revision_decision.contradiction_found
         self._case_telemetry["revision_rationale"] = revision_decision.rationale
         self._case_telemetry["anchoring_flag"] = scores.anchoring_flag
-        self._case_telemetry["confidence_instability_score"] = scores.confidence_instability_score
+        self._case_telemetry["confidence_instability_score"] = instability
         self._case_telemetry["revision_delta"] = scores.revision_delta
-        self._case_telemetry["belief_penalty_score"] = scores.penalty_score
+        self._case_telemetry["belief_penalty_score"] = penalty
         self._case_telemetry["final_selection_source"] = "full_case_revision"
 
         return revision_decision.response, raw
