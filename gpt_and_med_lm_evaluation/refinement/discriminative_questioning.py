@@ -208,19 +208,16 @@ def parse_integrated_decision_mcq(
     """Parse integrated MCQ decision payload."""
     data = extract_json_from_response(text)
 
+    def decode_index(raw_idx: int) -> int:
+        # Prefer absolute option indices; only fallback to candidate-rank decoding.
+        if 0 <= raw_idx < num_options:
+            return raw_idx
+        if candidate_indices and 0 <= raw_idx < len(candidate_indices):
+            return int(candidate_indices[raw_idx])
+        raise ValueError("Invalid integrated final_choice_index")
+
     raw_choice = int(data.get("final_choice_index", -1)) - 1
-    if candidate_indices:
-        # Prefer rank-relative decoding because the prompt presents a candidate block.
-        if 0 <= raw_choice < len(candidate_indices):
-            final_choice = int(candidate_indices[raw_choice])
-        elif 0 <= raw_choice < num_options:
-            final_choice = raw_choice
-        else:
-            raise ValueError("Invalid integrated final_choice_index")
-    else:
-        final_choice = raw_choice
-        if final_choice < 0 or final_choice >= num_options:
-            raise ValueError("Invalid integrated final_choice_index")
+    final_choice = decode_index(raw_choice)
 
     integration_summary = str(data.get("integration_summary", "")).strip()
     rationale = str(data.get("rationale", "")).strip()

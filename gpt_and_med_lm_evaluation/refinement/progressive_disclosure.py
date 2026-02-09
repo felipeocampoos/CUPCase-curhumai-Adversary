@@ -192,19 +192,16 @@ def parse_revision_decision_mcq(
 ) -> RevisionDecisionMCQ:
     data = extract_json_from_response(text)
 
+    def decode_index(raw_idx: int) -> int:
+        # Prefer absolute option indices; only fallback to candidate-rank decoding.
+        if 0 <= raw_idx < num_options:
+            return raw_idx
+        if candidate_indices and 0 <= raw_idx < len(candidate_indices):
+            return int(candidate_indices[raw_idx])
+        raise ValueError("final_choice_index out of range")
+
     raw_final_idx = int(data.get("final_choice_index", 0)) - 1
-    if candidate_indices:
-        # Prefer rank-relative decoding because prompt presents only ranked subset.
-        if 0 <= raw_final_idx < len(candidate_indices):
-            final_idx = int(candidate_indices[raw_final_idx])
-        elif 0 <= raw_final_idx < num_options:
-            final_idx = raw_final_idx
-        else:
-            raise ValueError("final_choice_index out of range")
-    else:
-        final_idx = raw_final_idx
-        if final_idx < 0 or final_idx >= num_options:
-            raise ValueError("final_choice_index out of range")
+    final_idx = decode_index(raw_final_idx)
 
     def parse_indices(key: str) -> List[int]:
         values = data.get(key, [])
@@ -214,10 +211,10 @@ def parse_revision_decision_mcq(
         for value in values:
             raw_idx = int(value) - 1
             idx: int | None = None
-            if candidate_indices and 0 <= raw_idx < len(candidate_indices):
-                idx = int(candidate_indices[raw_idx])
-            elif 0 <= raw_idx < num_options:
+            if 0 <= raw_idx < num_options:
                 idx = raw_idx
+            elif candidate_indices and 0 <= raw_idx < len(candidate_indices):
+                idx = int(candidate_indices[raw_idx])
             if idx is not None and idx not in parsed:
                 parsed.append(idx)
         return parsed

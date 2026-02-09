@@ -66,15 +66,27 @@ def test_parse_revision_decision_mcq_string_false():
     assert parsed.contradiction_found is False
 
 
-def test_parse_revision_decision_mcq_rank_relative_mapping():
+def test_parse_revision_decision_mcq_prefers_absolute_index_with_candidates():
     parsed = parse_revision_decision_mcq(
         '{"final_choice_index":1,"final_confidence":0.66,"revision_summary":"changed","kept_indices":[1,2],"dropped_indices":[3],"added_indices":[2],"contradiction_found":true,"rationale":"full"}',
         4,
         candidate_indices=[3, 1, 2],
     )
-    assert parsed.final_choice_index == 3
-    assert parsed.kept_indices == [3, 1]
+    assert parsed.final_choice_index == 0
+    assert parsed.kept_indices == [0, 1]
     assert parsed.dropped_indices == [2]
+    assert parsed.added_indices == [1]
+
+
+def test_parse_revision_decision_mcq_falls_back_to_rank_mapping():
+    parsed = parse_revision_decision_mcq(
+        '{"final_choice_index":3,"final_confidence":0.66,"revision_summary":"changed","kept_indices":[3],"dropped_indices":[2],"added_indices":[3],"contradiction_found":true,"rationale":"full"}',
+        2,
+        candidate_indices=[1, 0, 1],
+    )
+    assert parsed.final_choice_index == 1
+    assert parsed.kept_indices == [1]
+    assert parsed.dropped_indices == [1]
     assert parsed.added_indices == [1]
 
 
