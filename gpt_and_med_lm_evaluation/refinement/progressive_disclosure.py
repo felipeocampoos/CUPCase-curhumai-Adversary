@@ -76,6 +76,22 @@ def truncate_case_by_fraction(case_text: str, fraction: float = 0.2) -> str:
     return " ".join(words[:cutoff])
 
 
+def parse_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off", ""}:
+            return False
+    return default
+
+
 def parse_early_differential_free_text(text: str) -> EarlyDifferential:
     data = extract_json_from_response(text)
     items = data.get("candidates", [])
@@ -148,7 +164,7 @@ def parse_revision_decision_free_text(text: str) -> RevisionDecisionFreeText:
     kept_hypotheses = [str(x).strip() for x in data.get("kept_hypotheses", []) if str(x).strip()]
     dropped_hypotheses = [str(x).strip() for x in data.get("dropped_hypotheses", []) if str(x).strip()]
     added_hypotheses = [str(x).strip() for x in data.get("added_hypotheses", []) if str(x).strip()]
-    contradiction_found = bool(data.get("contradiction_found", False))
+    contradiction_found = parse_bool(data.get("contradiction_found"), default=False)
     rationale = str(data.get("rationale", "")).strip()
 
     response_obj.final_diagnosis = final_choice
@@ -211,7 +227,7 @@ def parse_revision_decision_mcq(
         kept_indices=parse_indices("kept_indices"),
         dropped_indices=parse_indices("dropped_indices"),
         added_indices=parse_indices("added_indices"),
-        contradiction_found=bool(data.get("contradiction_found", False)),
+        contradiction_found=parse_bool(data.get("contradiction_found"), default=False),
         rationale=str(data.get("rationale", "")).strip(),
         raw_response=text,
     )

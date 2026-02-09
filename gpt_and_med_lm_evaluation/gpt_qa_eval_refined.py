@@ -170,9 +170,18 @@ def parse_discriminator_choice(
 
 def extract_distractors(row: pd.Series, true_diagnosis: str) -> List[str]:
     distractors: List[str] = []
+    true_normalized = true_diagnosis.strip().lower()
     for key in ("distractor1", "distractor2", "distractor3", "distractor4"):
-        value = str(row.get(key, "")).strip()
-        if value and value != true_diagnosis and value not in distractors:
+        raw_value = row.get(key, "")
+        if pd.isna(raw_value):
+            continue
+        value = str(raw_value).strip()
+        if not value:
+            continue
+        normalized = value.lower()
+        if normalized in {"nan", "none", "null"}:
+            continue
+        if normalized != true_normalized and value not in distractors:
             distractors.append(value)
     if len(distractors) < 3:
         raise ValueError("Need at least 3 distractors for MCQ setup")

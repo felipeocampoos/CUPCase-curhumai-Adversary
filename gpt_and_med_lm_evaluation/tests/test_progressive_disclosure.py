@@ -50,6 +50,14 @@ def test_parse_revision_decision_mcq():
     assert parsed.contradiction_found is True
 
 
+def test_parse_revision_decision_mcq_string_false():
+    parsed = parse_revision_decision_mcq(
+        '{"final_choice_index":3,"final_confidence":0.66,"revision_summary":"changed","kept_indices":[2],"dropped_indices":[1],"added_indices":[3],"contradiction_found":"false","rationale":"full"}',
+        4,
+    )
+    assert parsed.contradiction_found is False
+
+
 def test_parse_revision_decision_mcq_rank_relative_mapping():
     parsed = parse_revision_decision_mcq(
         '{"final_choice_index":1,"final_confidence":0.66,"revision_summary":"changed","kept_indices":[1,2],"dropped_indices":[3],"added_indices":[2],"contradiction_found":true,"rationale":"full"}',
@@ -60,6 +68,13 @@ def test_parse_revision_decision_mcq_rank_relative_mapping():
     assert parsed.kept_indices == [3, 1]
     assert parsed.dropped_indices == [2]
     assert parsed.added_indices == [1]
+
+
+def test_parse_revision_decision_free_text_string_false():
+    parsed = parse_revision_decision_free_text(
+        '{"response":{"final_diagnosis":"Dx B","next_steps":["step"]},"final_choice":"Dx B","final_confidence":0.7,"revision_summary":"changed","kept_hypotheses":["Dx A"],"dropped_hypotheses":["Dx C"],"added_hypotheses":["Dx B"],"contradiction_found":"false","rationale":"full case"}'
+    )
+    assert parsed.contradiction_found is False
 
 
 def test_compute_belief_revision_scores_flags_instability():

@@ -66,6 +66,19 @@ def test_extract_distractors_prefers_unique_values():
     assert distractors == ["Dx B", "Dx C", "Dx D"]
 
 
+def test_extract_distractors_rejects_missing_values():
+    row = pd.Series(
+        {
+            "distractor1": "Dx B",
+            "distractor2": float("nan"),
+            "distractor3": "",
+            "distractor4": "Dx D",
+        }
+    )
+    with pytest.raises(ValueError, match="Need at least 3 distractors"):
+        extract_distractors(row, true_diagnosis="Dx A")
+
+
 def test_valid_variants_include_discriminative_question():
     assert "discriminative_question" in VALID_VARIANTS
 
