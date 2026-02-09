@@ -20,13 +20,20 @@ def apply_default_variant(argv: list[str]) -> list[str]:
 
 def run(argv: list[str] | None = None) -> None:
     if argv is None:
-        argv = sys.argv
+        argv = list(sys.argv)
+    else:
+        argv = list(argv)
 
     apply_default_variant(argv)
 
     from gpt_free_text_eval_refined import main
 
-    main()
+    prev_argv = sys.argv
+    try:
+        sys.argv = argv
+        main()
+    finally:
+        sys.argv = prev_argv
 
 
 if __name__ == "__main__":
