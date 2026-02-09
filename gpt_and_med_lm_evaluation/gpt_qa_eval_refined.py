@@ -712,10 +712,18 @@ def main() -> None:
     revision_prompt_template = load_prompt_template(prompt_folder, "revision_mcq") if args.variant == "progressive_disclosure" else ""
 
     all_results: List[Dict[str, Any]] = []
+    effective_batch_size = min(args.batch_size, len(ds))
+    if effective_batch_size < args.batch_size:
+        logger.warning(
+            "Requested batch size (%s) exceeds dataset size (%s); using %s rows per batch",
+            args.batch_size,
+            len(ds),
+            effective_batch_size,
+        )
 
     for batch_num in range(args.n_batches):
         logger.info("Processing batch %s/%s", batch_num + 1, args.n_batches)
-        batch = ds.sample(n=args.batch_size, random_state=args.random_seed + batch_num)
+        batch = ds.sample(n=effective_batch_size, random_state=args.random_seed + batch_num)
 
         batch_results = process_batch(
             batch=batch,
