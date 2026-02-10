@@ -32,8 +32,10 @@ from refinement import (
     compute_compliance_rate,
     compute_clinical_quality_stats,
     compute_hard_fail_rate,
+    create_refiner_variant,
+    list_refiner_variants,
 )
-from refinement.refiner import RefinerConfig, create_refiner, BatchRefiner
+from refinement.refiner import RefinerConfig
 from refinement.io import JSONLLogger, CSVExporter, save_summary_report, hash_case_text
 from refinement.schema import ChecklistConfig
 
@@ -84,6 +86,30 @@ def parse_args():
         help="Minimum clinical quality score (0-5)",
     )
     parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.65,
+        help="Cosine similarity threshold for semantic_similarity_gated variant",
+    )
+    parser.add_argument(
+        "--disclosure-fraction",
+        type=float,
+        default=0.2,
+        help="Early-case fraction for progressive_disclosure variant",
+    )
+    parser.add_argument(
+        "--early-confidence-threshold",
+        type=float,
+        default=0.8,
+        help="Early confidence threshold used for revision-penalty telemetry",
+    )
+    parser.add_argument(
+        "--revision-instability-threshold",
+        type=float,
+        default=0.5,
+        help="Confidence shift threshold used for revision-penalty telemetry",
+    )
+    parser.add_argument(
         "--n-batches",
         type=int,
         default=4,
@@ -106,6 +132,13 @@ def parse_args():
         type=str,
         default=None,
         help="Path to JSONL to resume from (for partial runs)",
+    )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        default="baseline",
+        choices=list_refiner_variants(),
+        help="Refinement variant to run",
     )
     
     return parser.parse_args()
@@ -184,6 +217,7 @@ def create_summary_report(
     config: RefinerConfig,
     checklist_config: ChecklistConfig,
     runtime_seconds: float,
+    variant: str,
 ) -> Dict[str, Any]:
     """Create a summary report of the evaluation."""
     import numpy as np
@@ -219,6 +253,7 @@ def create_summary_report(
     report = {
         "timestamp": datetime.now().isoformat(),
         "n_cases": len(traces),
+        "variant": variant,
         "config": config.to_dict(),
         "metrics": {
             "bertscore": {
@@ -245,6 +280,9 @@ def create_summary_report(
 def main():
     """Main entry point."""
     args = parse_args()
+
+    if args.variant != "baseline" and args.output_dir == "output/refined":
+        args.output_dir = f"output/refined_{args.variant}"
     
     # Create output directory
     output_dir = Path(args.output_dir)
@@ -263,10 +301,14 @@ def main():
         editor_model=args.model,
         max_iterations=args.max_iterations,
         clinical_quality_threshold=args.clinical_threshold,
+        similarity_threshold=args.similarity_threshold,
+        disclosure_fraction=args.disclosure_fraction,
+        early_confidence_threshold=args.early_confidence_threshold,
+        revision_instability_threshold=args.revision_instability_threshold,
     )
     
-    # Create refiner
-    refiner = create_refiner(config=config)
+    # Create refiner variant
+    refiner = create_refiner_variant(variant=args.variant, config=config)
     
     # Load checklist config for metrics
     checklist_config = ChecklistConfig.load()
@@ -343,6 +385,7 @@ def main():
         config=config,
         checklist_config=checklist_config,
         runtime_seconds=runtime,
+        variant=args.variant,
     )
     
     report_path = output_dir / f"summary_report_{timestamp}.json"
@@ -353,6 +396,7 @@ def main():
     print("\n" + "=" * 70)
     print("REFINEMENT EVALUATION SUMMARY")
     print("=" * 70)
+    print(f"Variant:              {args.variant}")
     print(f"Cases processed:      {len(all_traces)}")
     print(f"BERTScore F1 (mean):  {report['metrics']['bertscore']['mean']:.4f}")
     print(f"BERTScore F1 (std):   {report['metrics']['bertscore']['std']:.4f}")

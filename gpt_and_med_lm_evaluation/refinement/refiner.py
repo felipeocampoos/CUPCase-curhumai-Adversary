@@ -83,6 +83,10 @@ class RefinerConfig:
     retry_delay: float = 60.0
     api_delay: float = 1.0
     temperature: float = 0.0
+    similarity_threshold: float = 0.65
+    disclosure_fraction: float = 0.2
+    early_confidence_threshold: float = 0.8
+    revision_instability_threshold: float = 0.5
     checklist_config_path: Optional[Path] = None
     provider: JudgeProvider = JudgeProvider.OPENAI
     
@@ -97,6 +101,10 @@ class RefinerConfig:
             "retry_delay": self.retry_delay,
             "api_delay": self.api_delay,
             "temperature": self.temperature,
+            "similarity_threshold": self.similarity_threshold,
+            "disclosure_fraction": self.disclosure_fraction,
+            "early_confidence_threshold": self.early_confidence_threshold,
+            "revision_instability_threshold": self.revision_instability_threshold,
             "provider": self.provider.value,
         }
 
@@ -113,6 +121,7 @@ class IterativeRefiner:
        c. Else → Edit response (Editor)
     3. If not compliant by max iterations → return best attempt
     """
+    variant_name: str = "baseline"
     
     def __init__(
         self,
@@ -278,6 +287,15 @@ class IterativeRefiner:
             True if all criteria met
         """
         return critic_result.is_compliant(self.config.clinical_quality_threshold)
+
+    def _get_case_variant_metadata(self) -> Dict[str, Any]:
+        """
+        Return variant-specific metadata for the current case.
+
+        Subclasses can override this to attach routing decisions or other
+        variant artifacts to the trace.
+        """
+        return {}
     
     def refine(
         self,
@@ -402,6 +420,8 @@ class IterativeRefiner:
             checklist_pass_map=checklist_pass_map,
             clinical_quality_score=clinical_quality_score,
             hard_fail=hard_fail,
+            variant_name=self.variant_name,
+            variant_metadata=self._get_case_variant_metadata(),
         )
         
         return trace
@@ -432,6 +452,8 @@ class IterativeRefiner:
             checklist_pass_map={},
             clinical_quality_score=None,
             hard_fail=True,
+            variant_name=self.variant_name,
+            variant_metadata=self._get_case_variant_metadata(),
         )
     
     def _create_format_failure_critic(self) -> CriticResult:

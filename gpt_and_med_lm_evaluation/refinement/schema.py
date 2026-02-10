@@ -200,6 +200,8 @@ class RefinementTrace:
     checklist_pass_map: Dict[str, bool] = field(default_factory=dict)
     clinical_quality_score: Optional[int] = None
     hard_fail: bool = False
+    variant_name: str = "baseline"
+    variant_metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -216,6 +218,8 @@ class RefinementTrace:
             "checklist_pass_map": self.checklist_pass_map,
             "clinical_quality_score": self.clinical_quality_score,
             "hard_fail": self.hard_fail,
+            "variant_name": self.variant_name,
+            "variant_metadata": self.variant_metadata,
         }
     
     @classmethod
@@ -245,6 +249,8 @@ class RefinementTrace:
             checklist_pass_map=data.get("checklist_pass_map", {}),
             clinical_quality_score=data.get("clinical_quality_score"),
             hard_fail=data.get("hard_fail", False),
+            variant_name=data.get("variant_name", "baseline"),
+            variant_metadata=data.get("variant_metadata", {}),
         )
 
 
