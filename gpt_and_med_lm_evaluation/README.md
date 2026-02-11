@@ -5,11 +5,19 @@ This directory contains all the tools and scripts necessary to recreate the eval
 
 ## Installation
 
-To get started, you'll need to install the required dependencies. Run the following command:
+Use Python 3.12 and the pinned pip dependencies in this directory.
 
 ```bash
-pip install -r requirements.txt
+python3.12 -m venv .venv312
+source .venv312/bin/activate
+pip install -r requirements-py312.txt
+python check_env.py
 ```
+
+Notes:
+- `.python-version` at repo root pins Python to `3.12.5` for pyenv users.
+- `check_env.py` fails fast if Python/package versions do not match the required stack.
+- `requierments.txt` is a legacy conda-style file; use `requirements-py312.txt` for pip installs.
 
 ## Dataset
 

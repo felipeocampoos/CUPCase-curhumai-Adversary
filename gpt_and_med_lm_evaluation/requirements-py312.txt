@@ -1,0 +1,9 @@
+# Pinned eval stack for Python 3.12.
+# Use this file for reproducible local runs and CI.
+openai==2.20.0
+python-dotenv==1.2.1
+pandas==3.0.0
+datasets==4.5.0
+bert-score==0.3.13
+transformers==4.41.2
+tokenizers==0.19.1
