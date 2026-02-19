@@ -70,6 +70,57 @@ python prepare_hf_diagnosismedqa.py --output datasets/DiagnosisMedQA_eval_custom
 python prepare_hf_diagnosismedqa.py --sample-size 10 --output datasets/DiagnosisMedQA_eval_custom_first10.csv
 ```
 
+### 3.1 Full Hugging Face integration instructions
+
+Dataset source:
+- `oriel9p/DiagnosisMedQA`
+- Split: `train` (829 rows)
+- Expected columns: `id`, `clean_case_presentation`, `correct_diagnosis`, `distractor1`, `distractor2`, `distractor3`
+
+Prepare evaluator-compatible CSV from Hugging Face:
+
+```bash
+cd gpt_and_med_lm_evaluation
+source .venv312/bin/activate
+pip install datasets
+python prepare_hf_diagnosismedqa.py \
+  --dataset oriel9p/DiagnosisMedQA \
+  --split train \
+  --output datasets/DiagnosisMedQA_eval.csv
+```
+
+Optional quick subset for fast iteration:
+
+```bash
+python prepare_hf_diagnosismedqa.py \
+  --output datasets/DiagnosisMedQA_eval_100.csv \
+  --sample-size 100 \
+  --seed 42
+```
+
+Run the domain-routed free-text refinement on the HF-prepared CSV:
+
+```bash
+python gpt_free_text_eval_refined.py \
+  --variant domain_routed \
+  --input datasets/DiagnosisMedQA_eval.csv \
+  --output-dir output/refined_domain_routed_diagnosismedqa \
+  --n-batches 1 \
+  --batch-size 250
+```
+
+Run MCQ refined evaluation on the same HF-prepared CSV:
+
+```bash
+python gpt_qa_eval_refined.py \
+  --variant discriminative_question \
+  --input datasets/DiagnosisMedQA_eval.csv \
+  --output output/gpt4_multiple_choice_refined_hf.csv \
+  --provider openai \
+  --n-batches 1 \
+  --batch-size 250
+```
+
 ---
 
 ## 4) Methods included in “all methods”

@@ -445,41 +445,10 @@ output/
 
 ## Using DiagnosisMedQA (Hugging Face)
 
-Dataset:
-- `oriel9p/DiagnosisMedQA`
-- Split: `train` (829 rows)
-- Columns: `id`, `clean_case_presentation`, `correct_diagnosis`, `distractor1`, `distractor2`, `distractor3`
+Canonical instructions now live in the top-level runbook:
+- `README.md` -> section `3.1 Full Hugging Face integration instructions`
 
-Convert it to the evaluator CSV schema:
-
-```bash
-cd gpt_and_med_lm_evaluation
-pip install datasets
-python prepare_hf_diagnosismedqa.py \
-  --dataset oriel9p/DiagnosisMedQA \
-  --split train \
-  --output datasets/DiagnosisMedQA_eval.csv
-```
-
-Optional quick subset for fast iteration:
-
-```bash
-python prepare_hf_diagnosismedqa.py \
-  --output datasets/DiagnosisMedQA_eval_100.csv \
-  --sample-size 100 \
-  --seed 42
-```
-
-Run the domain-routed refinement variant:
-
-```bash
-python gpt_free_text_eval_refined.py \
-  --variant domain_routed \
-  --input datasets/DiagnosisMedQA_eval.csv \
-  --output-dir output/refined_domain_routed_diagnosismedqa \
-  --n-batches 1 \
-  --batch-size 250
-```
+That section includes dataset schema, HF conversion, optional sampling, and both free-text + MCQ run examples.
 
 ## MCQ Refined Evaluation
 
