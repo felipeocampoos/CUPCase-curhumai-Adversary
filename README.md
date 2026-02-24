@@ -56,10 +56,14 @@ Key usage:
 
 ## 3) Dataset modes used by this runbook
 
-This runbook uses pre-existing DiagnosisMedQA-formatted CSVs:
+This runbook uses two dataset presets:
 
-- `full`: `gpt_and_med_lm_evaluation/datasets/DiagnosisMedQA_eval_20.csv`
-- `partial`: `gpt_and_med_lm_evaluation/datasets/DiagnosisMedQA_eval_20_first10.csv`
+- **easy** (default): DiagnosisMedQA sample
+  - `full`: `gpt_and_med_lm_evaluation/datasets/DiagnosisMedQA_eval_20.csv`
+  - `partial`: `gpt_and_med_lm_evaluation/datasets/DiagnosisMedQA_eval_20_first10.csv`
+- **hard**: CUPCASE_RTEST sample
+  - `full`: `gpt_and_med_lm_evaluation/datasets/CUPCASE_RTEST_eval.csv`
+  - `sample`: `gpt_and_med_lm_evaluation/datasets/CUPCASE_RTEST_eval_20.csv`
 
 If needed, you can regenerate compatible files with:
 
@@ -68,6 +72,21 @@ cd gpt_and_med_lm_evaluation
 source .venv312/bin/activate
 python prepare_hf_diagnosismedqa.py --output datasets/DiagnosisMedQA_eval_custom.csv
 python prepare_hf_diagnosismedqa.py --sample-size 10 --output datasets/DiagnosisMedQA_eval_custom_first10.csv
+
+### 3.2 CUPCASE_RTEST (hard preset)
+
+Upstream: `oriel9p/CUPCASE_RTEST` (HF dataset). Requires `HF_TOKEN`.
+
+Regenerate full and sample CSVs:
+
+```
+python prepare_cupcase_rtest.py --hf-token $HF_TOKEN \
+  --output datasets/CUPCASE_RTEST_eval.csv
+
+python prepare_cupcase_rtest.py --hf-token $HF_TOKEN \
+  --sample-size 20 --seed 42 \
+  --output datasets/CUPCASE_RTEST_eval_20.csv
+```
 ```
 
 ### 3.1 Full Hugging Face integration instructions
@@ -176,11 +195,16 @@ Examples:
 
 From `gpt_and_med_lm_evaluation/` with `.venv312` active.
 
+Dataset presets:
+- `--dataset easy` (default) → `datasets/DiagnosisMedQA_eval_20.csv`
+- `--dataset hard` → `datasets/CUPCASE_RTEST_eval.csv`
+You can still pass `--input` for custom files; `--dataset custom` requires `--input`.
+
 ### 6.1 MCQ refined (OpenAI example)
 
 ```bash
 python gpt_qa_eval_refined.py \
-  --input datasets/DiagnosisMedQA_eval_20.csv \
+  --dataset easy \
   --output output/experiments/full/openai/mcq/discriminative_question/results.csv \
   --provider openai \
   --variant discriminative_question \
@@ -192,7 +216,7 @@ python gpt_qa_eval_refined.py \
 
 ```bash
 python gpt_qa_eval_refined.py \
-  --input datasets/DiagnosisMedQA_eval_20.csv \
+  --dataset easy \
   --output output/experiments/full/deepseek/mcq/semantic_similarity_gated/results.csv \
   --provider deepseek \
   --variant semantic_similarity_gated \
@@ -204,7 +228,7 @@ python gpt_qa_eval_refined.py \
 
 ```bash
 python gpt_free_text_eval_refined.py \
-  --input datasets/DiagnosisMedQA_eval_20.csv \
+  --dataset easy \
   --output-dir output/experiments/full/openai/free_text/domain_routed \
   --variant domain_routed \
   --model gpt-4o \

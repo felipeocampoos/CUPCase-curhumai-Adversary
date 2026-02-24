@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument(
         "--input",
         type=str,
-        default="datasets/Case_report_w_images_dis_VF.csv",
+        default=None,
         help="Path to input dataset CSV",
     )
     parser.add_argument(
@@ -140,7 +140,14 @@ def parse_args():
         choices=list_refiner_variants(),
         help="Refinement variant to run",
     )
-    
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="easy",
+        choices=["easy", "hard", "custom"],
+        help="Dataset preset: easy (DiagnosisMedQA 20) or hard (CUPCASE_RTEST); custom requires --input",
+    )
+
     return parser.parse_args()
 
 
@@ -160,8 +167,16 @@ def sample_batches(
 ) -> List[pd.DataFrame]:
     """Sample batches from the dataset."""
     batches = []
+    effective_batch = min(batch_size, len(ds))
+    if effective_batch < batch_size:
+        logger.warning(
+            "Requested batch size (%s) exceeds dataset size (%s); using %s",
+            batch_size,
+            len(ds),
+            effective_batch,
+        )
     for batch_num in range(n_batches):
-        batch = ds.sample(n=batch_size, random_state=random_seed + batch_num)
+        batch = ds.sample(n=effective_batch, random_state=random_seed + batch_num)
         batches.append(batch)
         logger.info(f"Sampled batch {batch_num + 1}/{n_batches} with {len(batch)} cases")
     return batches
@@ -281,6 +296,15 @@ def main():
     """Main entry point."""
     args = parse_args()
 
+    if args.dataset == "easy" and args.input is None:
+        input_path = "datasets/DiagnosisMedQA_eval_20.csv"
+    elif args.dataset == "hard" and args.input is None:
+        input_path = "datasets/CUPCASE_RTEST_eval.csv"
+    elif args.input is None:
+        raise ValueError("--input is required when --dataset=custom")
+    else:
+        input_path = args.input
+
     if args.variant != "baseline" and args.output_dir == "output/refined":
         args.output_dir = f"output/refined_{args.variant}"
     
@@ -292,7 +316,7 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Load dataset
-    ds = load_dataset(args.input)
+    ds = load_dataset(input_path)
     
     # Configure refiner
     config = RefinerConfig(

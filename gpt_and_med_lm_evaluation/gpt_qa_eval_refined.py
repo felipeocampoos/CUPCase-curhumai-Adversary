@@ -46,6 +46,9 @@ VALID_VARIANTS = [
 ]
 
 
+DATASET_CHOICES = ["easy", "hard", "custom"]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="MCQ evaluation with optional similarity gating")
     parser.add_argument("--input", type=str, default="ablation_study_tokens.csv")
@@ -63,6 +66,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-attempts", type=int, default=3)
     parser.add_argument("--retry-delay", type=float, default=60.0)
     parser.add_argument("--api-delay", type=float, default=1.0)
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="easy",
+        choices=DATASET_CHOICES,
+        help="Dataset preset: easy (DiagnosisMedQA 20), hard (CUPCASE_RTEST), or custom (use --input)",
+    )
     args = parser.parse_args()
     if args.model is None:
         args.model = JudgeProvider(args.provider).default_model
@@ -731,7 +741,16 @@ def process_batch(
 def main() -> None:
     args = parse_args()
 
-    ds = pd.read_csv(args.input)
+    if args.dataset == "easy" and args.input == "ablation_study_tokens.csv":
+        input_path = "datasets/DiagnosisMedQA_eval_20.csv"
+    elif args.dataset == "hard" and args.input == "ablation_study_tokens.csv":
+        input_path = "datasets/CUPCASE_RTEST_eval.csv"
+    elif args.dataset == "custom" and args.input == "ablation_study_tokens.csv":
+        raise ValueError("--input is required when --dataset=custom")
+    else:
+        input_path = args.input
+
+    ds = pd.read_csv(input_path)
     provider = JudgeProvider(args.provider)
     client = create_client(provider=provider)
     embedding_service = JinaEmbeddingService()
