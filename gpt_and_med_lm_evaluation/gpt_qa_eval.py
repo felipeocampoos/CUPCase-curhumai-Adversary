@@ -5,6 +5,9 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import time
 import random
+import re
+
+from eval_batching import build_eval_batches
 
 load_dotenv()
 
@@ -14,16 +17,60 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 # Read the CSV file
 ds = pd.read_csv('ablation_study_tokens.csv')
 
+
+def parse_predicted_index(text, num_options):
+    stripped = str(text).strip()
+    if not stripped:
+        return -1
+
+    explicit_matches = []
+    for pattern in (
+        r"(?:option|choice|answer|index|selected)\s*[:#=\-\s]*\(?\s*(\d+)\s*\)?",
+        r"\b(?:is|was)\s*(\d+)\b",
+    ):
+        explicit_matches.extend(re.findall(pattern, stripped, flags=re.IGNORECASE))
+
+    for match in reversed(explicit_matches):
+        idx = int(match) - 1
+        if 0 <= idx < num_options:
+            return idx
+
+    valid_indices = []
+    for match in re.finditer(r"(?<!\d)(\d+)(?!\d)", stripped):
+        idx = int(match.group(1)) - 1
+        if 0 <= idx < num_options:
+            valid_indices.append(idx)
+
+    return valid_indices[-1] if valid_indices else -1
+
+
+def extract_distractors(row, true_diagnosis):
+    distractors = []
+    true_normalized = str(true_diagnosis).strip().lower()
+    for key in ("distractor1", "distractor2", "distractor3", "distractor4"):
+        raw_value = row.get(key, "")
+        if pd.isna(raw_value):
+            continue
+        value = str(raw_value).strip()
+        if not value:
+            continue
+        normalized = value.lower()
+        if normalized in {"nan", "none", "null"}:
+            continue
+        if normalized != true_normalized and value not in distractors:
+            distractors.append(value)
+    if len(distractors) < 3:
+        raise ValueError("Need at least 3 distractors for MCQ setup")
+    return distractors[:3]
+
 def process_batch(batch):
     results = []
     for _, row in batch.iterrows():
         case_presentation = row['case presentation']
         true_diagnosis = row['final diagnosis']
-        distractor2 = row['distractor2']
-        distractor3 = row['distractor3']
-        distractor4 = row['distractor4']
+        distractors = extract_distractors(row, true_diagnosis)
 
-        options = [true_diagnosis, distractor2, distractor3, distractor4]
+        options = [true_diagnosis] + distractors
         random.shuffle(options)
         options_text = "\n".join([f"{i+1}. {option}" for i, option in enumerate(options)])
         prompt = (f"Predict the diagnosis of this case presentation of a patient. Return only the correct index from the following list, for example: 3\n"
@@ -39,11 +86,7 @@ def process_batch(batch):
                     temperature=0.0
                 )
                 generated_diagnosis = response.choices[0].message.content.strip()
-                try:
-                    predicted_index = int(generated_diagnosis[0]) - 1
-                except Exception as e:
-                    predicted_index = -1
-                    print(e)
+                predicted_index = parse_predicted_index(generated_diagnosis, len(options))
                 break
             except Exception as e:
                 print(f"API error: {e}. Waiting for 60 seconds before retrying.")
@@ -62,17 +105,17 @@ def process_batch(batch):
     return results
 
 all_results = []
+batches = build_eval_batches(ds=ds, n_batches=4, batch_size=250, random_seed=0, sampling_mode="unique")
 
-for batch_num in range(4):
-    print(f"Processing batch {batch_num + 1}/4")
-    # Randomly sample 250 rows
-    batch = ds.sample(n=250, random_state=batch_num)
+for batch_num, batch in enumerate(batches, start=1):
+    print(f"Processing batch {batch_num}/{len(batches)}")
 
     batch_results = process_batch(batch)
     all_results.extend(batch_results)
 
-    print(f"Completed batch {batch_num + 1}/4")
-    time.sleep(10)  # Sleep for 10 seconds between batches
+    print(f"Completed batch {batch_num}/{len(batches)}")
+    if batch_num < len(batches):
+        time.sleep(10)  # Sleep for 10 seconds between batches
 
 # Convert results to DataFrame
 results_df = pd.DataFrame(all_results)

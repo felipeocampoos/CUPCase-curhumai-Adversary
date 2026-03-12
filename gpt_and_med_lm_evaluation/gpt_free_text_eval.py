@@ -6,6 +6,8 @@ from openai import OpenAI
 import time
 import random
 
+from eval_batching import build_eval_batches
+
 load_dotenv()
 
 # Set up OpenAI API key
@@ -49,17 +51,17 @@ def process_batch(batch):
 
 
 all_results = []
+batches = build_eval_batches(ds=ds, n_batches=4, batch_size=250, random_seed=0, sampling_mode="unique")
 
-for batch_num in range(4):
-    print(f"Processing batch {batch_num + 1}/4")
-    # Randomly sample 250 rows
-    batch = ds.sample(n=250, random_state=batch_num)
+for batch_num, batch in enumerate(batches, start=1):
+    print(f"Processing batch {batch_num}/{len(batches)}")
 
     batch_results = process_batch(batch)
     all_results.extend(batch_results)
 
-    print(f"Completed batch {batch_num + 1}/4")
-    time.sleep(10)  # Sleep for 10 seconds between batches
+    print(f"Completed batch {batch_num}/{len(batches)}")
+    if batch_num < len(batches):
+        time.sleep(10)  # Sleep for 10 seconds between batches
 
 # Convert results to DataFrame
 results_df = pd.DataFrame(all_results)

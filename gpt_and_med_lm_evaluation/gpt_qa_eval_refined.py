@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import pandas as pd
 
+from eval_batching import build_eval_batches
 from refinement.refiner import JudgeProvider, create_client
 from refinement.schema import extract_json_from_response
 from refinement.discriminative_questioning import (
@@ -66,6 +67,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-attempts", type=int, default=3)
     parser.add_argument("--retry-delay", type=float, default=60.0)
     parser.add_argument("--api-delay", type=float, default=1.0)
+    parser.add_argument(
+        "--sampling-mode",
+        type=str,
+        default="unique",
+        choices=["unique", "bootstrap"],
+        help="Batch sampling mode: unique evaluates each case at most once; bootstrap resamples each batch independently",
+    )
     parser.add_argument(
         "--dataset",
         type=str,
@@ -780,18 +788,16 @@ def main() -> None:
     revision_prompt_template = load_prompt_template(prompt_folder, "revision_mcq") if args.variant == "progressive_disclosure" else ""
 
     all_results: List[Dict[str, Any]] = []
-    effective_batch_size = min(args.batch_size, len(ds))
-    if effective_batch_size < args.batch_size:
-        logger.warning(
-            "Requested batch size (%s) exceeds dataset size (%s); using %s rows per batch",
-            args.batch_size,
-            len(ds),
-            effective_batch_size,
-        )
+    batches = build_eval_batches(
+        ds=ds,
+        n_batches=args.n_batches,
+        batch_size=args.batch_size,
+        random_seed=args.random_seed,
+        sampling_mode=args.sampling_mode,
+    )
 
-    for batch_num in range(args.n_batches):
-        logger.info("Processing batch %s/%s", batch_num + 1, args.n_batches)
-        batch = ds.sample(n=effective_batch_size, random_state=args.random_seed + batch_num)
+    for batch_num, batch in enumerate(batches, start=1):
+        logger.info("Processing batch %s/%s", batch_num, len(batches))
 
         batch_results = process_batch(
             batch=batch,
@@ -805,12 +811,12 @@ def main() -> None:
             integration_prompt_template=integration_prompt_template,
             early_prompt_template=early_prompt_template,
             revision_prompt_template=revision_prompt_template,
-            random_seed=args.random_seed + batch_num,
+            random_seed=args.random_seed + batch_num - 1,
         )
         all_results.extend(batch_results)
 
-        logger.info("Completed batch %s/%s", batch_num + 1, args.n_batches)
-        if batch_num < args.n_batches - 1:
+        logger.info("Completed batch %s/%s", batch_num, len(batches))
+        if batch_num < len(batches):
             time.sleep(10)
 
     results_df = pd.DataFrame(all_results)

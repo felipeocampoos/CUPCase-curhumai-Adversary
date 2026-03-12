@@ -13,6 +13,8 @@ from openai import OpenAI
 import time
 import argparse
 
+from eval_batching import build_eval_batches
+
 load_dotenv()
 
 # DeepSeek API configuration
@@ -113,17 +115,23 @@ def main():
     print(f"Loaded {len(ds)} cases from {args.input}")
     
     all_results = []
+    batches = build_eval_batches(
+        ds=ds,
+        n_batches=args.n_batches,
+        batch_size=args.batch_size,
+        random_seed=0,
+        sampling_mode="unique",
+    )
 
-    for batch_num in range(args.n_batches):
-        print(f"Processing batch {batch_num + 1}/{args.n_batches}")
-        # Randomly sample rows
-        batch = ds.sample(n=args.batch_size, random_state=batch_num)
+    for batch_num, batch in enumerate(batches, start=1):
+        print(f"Processing batch {batch_num}/{len(batches)}")
 
         batch_results = process_batch(batch, client, model=args.model)
         all_results.extend(batch_results)
 
-        print(f"Completed batch {batch_num + 1}/{args.n_batches}")
-        time.sleep(10)  # Sleep for 10 seconds between batches
+        print(f"Completed batch {batch_num}/{len(batches)}")
+        if batch_num < len(batches):
+            time.sleep(10)  # Sleep for 10 seconds between batches
 
     # Convert results to DataFrame
     results_df = pd.DataFrame(all_results)

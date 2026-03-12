@@ -36,8 +36,15 @@ from refinement import (
     list_refiner_variants,
 )
 from refinement.refiner import RefinerConfig
-from refinement.io import JSONLLogger, CSVExporter, save_summary_report, hash_case_text
+from refinement.io import (
+    JSONLLogger,
+    CSVExporter,
+    hash_case_text,
+    load_refinement_traces,
+    save_summary_report,
+)
 from refinement.schema import ChecklistConfig
+from eval_batching import build_eval_batches
 
 # Configure logging
 logging.basicConfig(
@@ -147,6 +154,13 @@ def parse_args():
         choices=["easy", "hard", "custom"],
         help="Dataset preset: easy (DiagnosisMedQA 20) or hard (CUPCASE_RTEST); custom requires --input",
     )
+    parser.add_argument(
+        "--sampling-mode",
+        type=str,
+        default="unique",
+        choices=["unique", "bootstrap"],
+        help="Batch sampling mode: unique evaluates each case at most once; bootstrap resamples each batch independently",
+    )
 
     return parser.parse_args()
 
@@ -164,21 +178,24 @@ def sample_batches(
     n_batches: int,
     batch_size: int,
     random_seed: int,
+    sampling_mode: str,
 ) -> List[pd.DataFrame]:
-    """Sample batches from the dataset."""
-    batches = []
-    effective_batch = min(batch_size, len(ds))
-    if effective_batch < batch_size:
-        logger.warning(
-            "Requested batch size (%s) exceeds dataset size (%s); using %s",
-            batch_size,
-            len(ds),
-            effective_batch,
+    """Build evaluation batches from the dataset."""
+    batches = build_eval_batches(
+        ds=ds,
+        n_batches=n_batches,
+        batch_size=batch_size,
+        random_seed=random_seed,
+        sampling_mode=sampling_mode,
+    )
+    for batch_num, batch in enumerate(batches, start=1):
+        logger.info(
+            "Prepared batch %s/%s with %s cases (%s mode)",
+            batch_num,
+            len(batches),
+            len(batch),
+            sampling_mode,
         )
-    for batch_num in range(n_batches):
-        batch = ds.sample(n=effective_batch, random_state=random_seed + batch_num)
-        batches.append(batch)
-        logger.info(f"Sampled batch {batch_num + 1}/{n_batches} with {len(batch)} cases")
     return batches
 
 
@@ -343,11 +360,23 @@ def main():
         n_batches=args.n_batches,
         batch_size=args.batch_size,
         random_seed=args.random_seed,
+        sampling_mode=args.sampling_mode,
     )
-    
+
     # Process all batches
     all_traces: List[RefinementTrace] = []
     start_time = time.time()
+
+    completed_case_hashes = set()
+    if args.resume_from:
+        existing_traces = load_refinement_traces(args.resume_from)
+        all_traces.extend(existing_traces)
+        completed_case_hashes = {trace.case_id for trace in existing_traces if trace.case_id}
+        logger.info(
+            "Loaded %s existing traces from %s; will skip matching case hashes",
+            len(existing_traces),
+            args.resume_from,
+        )
     
     # JSONL logger for traces
     jsonl_path = output_dir / f"refinement_traces_{timestamp}.jsonl"
@@ -359,7 +388,11 @@ def main():
             for idx, row in batch.iterrows():
                 case_text = row.get("clean text", row.get("case presentation", ""))
                 true_diagnosis = row.get("final diagnosis", "")
-                case_id = f"batch{batch_num}_idx{idx}"
+                case_id = hash_case_text(case_text)
+
+                if case_id in completed_case_hashes:
+                    logger.info("Skipping already completed case %s", case_id)
+                    continue
                 
                 logger.info(f"Processing case {case_id}")
                 
@@ -370,11 +403,9 @@ def main():
                         true_diagnosis=true_diagnosis,
                         case_id=case_id,
                     )
-                    
-                    # Add case hash for alignment
-                    trace.case_id = hash_case_text(case_text)
-                    
+
                     all_traces.append(trace)
+                    completed_case_hashes.add(case_id)
                     logger_jsonl.log(trace)
                     
                 except Exception as e:
