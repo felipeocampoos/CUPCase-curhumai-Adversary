@@ -46,11 +46,28 @@ Create `gpt_and_med_lm_evaluation/.env`:
 ```bash
 OPENAI_API_KEY="<your_openai_key>"
 DEEPSEEK_API_KEY="<your_deepseek_key>"
+OPENAI_COMPATIBLE_BASE_URL="http://localhost:8000/v1"
+OPENAI_COMPATIBLE_API_KEY="dummy"
+OPENAI_COMPATIBLE_MODEL="Qwen/Qwen3.5-0.8B"
+HUGGINGFACE_LOCAL_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
+HF_TOKEN=""
 ```
 
 Key usage:
 - OpenAI runs require `OPENAI_API_KEY`
 - DeepSeek runs require `DEEPSEEK_API_KEY`
+- OpenAI-compatible local or cluster Qwen runs use `OPENAI_COMPATIBLE_BASE_URL` and `OPENAI_COMPATIBLE_MODEL`
+- Native local Hugging Face runs use `HUGGINGFACE_LOCAL_MODEL` and optionally `HF_TOKEN`
+
+Preflight smoke checks:
+
+```bash
+cd gpt_and_med_lm_evaluation
+python openai_compatible_smoke.py --task mcq
+python openai_compatible_smoke.py --task free_text --variant baseline
+python huggingface_local_smoke.py --task mcq
+python huggingface_local_smoke.py --task free_text --variant baseline
+```
 
 ---
 
@@ -150,6 +167,8 @@ Script: `gpt_and_med_lm_evaluation/gpt_qa_eval_refined.py`
 Providers:
 - `openai`
 - `deepseek`
+- `openai_compatible`
+- `huggingface_local`
 
 Variants:
 - `baseline`
@@ -159,6 +178,12 @@ Variants:
 
 ### Free-text refined runner
 Script: `gpt_and_med_lm_evaluation/gpt_free_text_eval_refined.py`
+
+Providers:
+- `openai`
+- `deepseek`
+- `openai_compatible`
+- `huggingface_local`
 
 Variants:
 - `baseline`
@@ -224,19 +249,84 @@ python gpt_qa_eval_refined.py \
   --batch-size 20
 ```
 
-### 6.3 Free-text refined (OpenAI example)
+### 6.3 MCQ refined (OpenAI-compatible Qwen example)
+
+```bash
+cd gpt_and_med_lm_evaluation
+python openai_compatible_smoke.py --task mcq
+
+python gpt_qa_eval_refined.py \
+  --dataset hard \
+  --output output/experiments/full/openai_compatible/mcq/baseline/results.csv \
+  --provider openai_compatible \
+  --model Qwen/Qwen3.5-0.8B \
+  --variant baseline \
+  --n-batches 1 \
+  --batch-size 20
+```
+
+### 6.4 MCQ refined (local Hugging Face Qwen example)
+
+```bash
+cd gpt_and_med_lm_evaluation
+python huggingface_local_smoke.py --task mcq
+
+python gpt_qa_eval_refined.py \
+  --dataset easy \
+  --output output/experiments/full/huggingface_local/mcq/baseline/results.csv \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --variant baseline \
+  --n-batches 1 \
+  --batch-size 1
+```
+
+### 6.5 Free-text refined (OpenAI example)
 
 ```bash
 python gpt_free_text_eval_refined.py \
   --dataset easy \
   --output-dir output/experiments/full/openai/free_text/domain_routed \
+  --provider openai \
   --variant domain_routed \
   --model gpt-4o \
   --n-batches 1 \
   --batch-size 20
 ```
 
-### 6.4 DeepSeek free-text baseline
+### 6.6 Free-text refined (OpenAI-compatible Qwen example)
+
+```bash
+cd gpt_and_med_lm_evaluation
+python openai_compatible_smoke.py --task free_text --variant baseline
+
+python gpt_free_text_eval_refined.py \
+  --dataset hard \
+  --output-dir output/experiments/full/openai_compatible/free_text/baseline \
+  --provider openai_compatible \
+  --variant baseline \
+  --model Qwen/Qwen3.5-0.8B \
+  --n-batches 1 \
+  --batch-size 20
+```
+
+### 6.7 Free-text refined (local Hugging Face Qwen example)
+
+```bash
+cd gpt_and_med_lm_evaluation
+python huggingface_local_smoke.py --task free_text --variant baseline
+
+python gpt_free_text_eval_refined.py \
+  --dataset hard \
+  --output-dir output/experiments/full/huggingface_local/free_text/baseline \
+  --provider huggingface_local \
+  --variant baseline \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --n-batches 1 \
+  --batch-size 1
+```
+
+### 6.8 DeepSeek free-text baseline
 
 ```bash
 python deepseek_free_text_eval.py \
@@ -246,7 +336,7 @@ python deepseek_free_text_eval.py \
   --batch-size 20
 ```
 
-### 6.5 Compare baseline vs refined
+### 6.9 Compare baseline vs refined
 
 ```bash
 python compare_baseline_vs_refined.py \

@@ -91,7 +91,7 @@ for mode in full partial; do
   idx=$((idx + 1))
 done
 
-# 4) Comparison jobs (OpenAI free baseline vs non-baseline refined): 2 modes x 4 variants = 8 jobs
+# 4) Comparison jobs (same-provider refined baseline vs non-baseline refined): 2 modes x 4 variants = 8 jobs
 for mode in full partial; do
   for variant in domain_routed semantic_similarity_gated discriminative_question progressive_disclosure; do
     JOB_KIND[$idx]="compare"

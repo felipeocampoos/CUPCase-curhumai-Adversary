@@ -360,7 +360,7 @@ def format_text_report(report: Dict[str, Any]) -> str:
         if direction == "improved":
             lines.append(f"  {metric_name}: {significant} IMPROVED by {abs(delta):.4f}")
         elif direction == "declined":
-            lines.append(f"  {metric_name}: {significantly} DECLINED by {abs(delta):.4f}")
+            lines.append(f"  {metric_name}: {significant} DECLINED by {abs(delta):.4f}")
         else:
             lines.append(f"  {metric_name}: UNCHANGED")
     

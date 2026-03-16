@@ -34,6 +34,33 @@ To use DeepSeek Chat as a judge model, add your DeepSeek API key:
 ```bash
 DEEPSEEK_API_KEY="YOUR_DEEPSEEK_API_KEY_HERE"
 ```
+
+To use a local or cluster-hosted OpenAI-compatible server such as vLLM serving Qwen:
+```bash
+OPENAI_COMPATIBLE_BASE_URL="http://localhost:8000/v1"
+OPENAI_COMPATIBLE_API_KEY="dummy"  # optional for local servers
+OPENAI_COMPATIBLE_MODEL="Qwen/Qwen3.5-0.8B"
+```
+
+Validate that endpoint before running a benchmark:
+
+```bash
+python openai_compatible_smoke.py --task mcq
+python openai_compatible_smoke.py --task free_text --variant baseline
+```
+
+To run a Hugging Face model directly in the local Python process:
+```bash
+HUGGINGFACE_LOCAL_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
+HF_TOKEN=""  # only needed for gated/private models
+```
+
+Validate that local path before running a benchmark:
+
+```bash
+python huggingface_local_smoke.py --task mcq
+python huggingface_local_smoke.py --task free_text --variant baseline
+```
 ## Usage
 
 To perform evaluation, run the specific evaluation script you wish to use. For example:
@@ -231,6 +258,7 @@ python gpt_free_text_eval_refined.py \
     --input datasets/Case_report_w_images_dis_VF.csv \
     --output-dir output/refined \
     --variant baseline \
+    --provider openai \
     --model gpt-4o \
     --max-iterations 3 \
     --clinical-threshold 3 \
@@ -240,6 +268,19 @@ python gpt_free_text_eval_refined.py \
     --revision-instability-threshold 0.5 \
     --n-batches 4 \
     --batch-size 250
+```
+
+OpenAI-compatible local or cluster judge example:
+
+```bash
+python gpt_free_text_eval_refined.py \
+    --input datasets/CUPCASE_RTEST_eval_20.csv \
+    --output-dir output/refined_qwen_debug \
+    --variant baseline \
+    --provider openai_compatible \
+    --model Qwen/Qwen3.5-0.8B \
+    --n-batches 1 \
+    --batch-size 20
 ```
 
 When `--variant` is not `baseline` and `--output-dir` is left as default,
@@ -459,9 +500,38 @@ python gpt_qa_eval_refined.py \
   --variant discriminative_question \
   --input ablation_study_tokens.csv \
   --output output/gpt4_multiple_choice_refined.csv \
+  --provider openai \
   --model gpt-4o \
   --n-batches 4 \
   --batch-size 250
+```
+
+MCQ with a local OpenAI-compatible Qwen server:
+
+```bash
+python gpt_qa_eval_refined.py \
+  --variant baseline \
+  --input datasets/CUPCASE_RTEST_eval_20.csv \
+  --output output/qwen_multiple_choice_refined.csv \
+  --provider openai_compatible \
+  --model Qwen/Qwen3.5-35B \
+  --n-batches 1 \
+  --batch-size 20
+```
+
+MCQ with a local Hugging Face Qwen model:
+
+```bash
+python huggingface_local_smoke.py --task mcq
+
+python gpt_qa_eval_refined.py \
+  --variant baseline \
+  --input datasets/DiagnosisMedQA_eval_20_first10.csv \
+  --output output/qwen_multiple_choice_refined_hf_local.csv \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --n-batches 1 \
+  --batch-size 1
 ```
 
 Additional MCQ output columns:

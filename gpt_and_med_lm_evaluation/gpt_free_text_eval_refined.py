@@ -36,6 +36,7 @@ from refinement import (
     list_refiner_variants,
 )
 from refinement.refiner import RefinerConfig
+from refinement.refiner import JudgeProvider
 from refinement.io import (
     JSONLLogger,
     CSVExporter,
@@ -77,8 +78,15 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-4o",
+        default=None,
         help="Model to use for generation/critique/editing",
+    )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default=JudgeProvider.OPENAI.value,
+        choices=[provider.value for provider in JudgeProvider],
+        help="Judge backend provider",
     )
     parser.add_argument(
         "--max-iterations",
@@ -162,7 +170,10 @@ def parse_args():
         help="Batch sampling mode: unique evaluates each case at most once; bootstrap resamples each batch independently",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.model is None:
+        args.model = JudgeProvider(args.provider).default_model
+    return args
 
 
 def load_dataset(path: str) -> pd.DataFrame:
@@ -336,6 +347,7 @@ def main():
     ds = load_dataset(input_path)
     
     # Configure refiner
+    provider = JudgeProvider(args.provider)
     config = RefinerConfig(
         generator_model=args.model,
         critic_model=args.model,
@@ -346,6 +358,7 @@ def main():
         disclosure_fraction=args.disclosure_fraction,
         early_confidence_threshold=args.early_confidence_threshold,
         revision_instability_threshold=args.revision_instability_threshold,
+        provider=provider,
     )
     
     # Create refiner variant

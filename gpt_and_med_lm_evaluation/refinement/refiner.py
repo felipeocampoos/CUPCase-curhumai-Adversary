@@ -20,19 +20,31 @@ class JudgeProvider(str, Enum):
     
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    HUGGINGFACE_LOCAL = "huggingface_local"
     
     @property
     def base_url(self) -> Optional[str]:
         """Get the API base URL for the provider."""
+        import os
+
         if self == JudgeProvider.DEEPSEEK:
             return "https://api.deepseek.com"
+        if self == JudgeProvider.OPENAI_COMPATIBLE:
+            return os.environ.get("OPENAI_COMPATIBLE_BASE_URL")
         return None  # OpenAI uses default
     
     @property
     def default_model(self) -> str:
         """Get the default model for the provider."""
+        import os
+
         if self == JudgeProvider.DEEPSEEK:
             return "deepseek-chat"
+        if self == JudgeProvider.OPENAI_COMPATIBLE:
+            return os.environ.get("OPENAI_COMPATIBLE_MODEL", "openai-compatible-model")
+        if self == JudgeProvider.HUGGINGFACE_LOCAL:
+            return os.environ.get("HUGGINGFACE_LOCAL_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
         return "gpt-4o"
     
     @property
@@ -40,7 +52,107 @@ class JudgeProvider(str, Enum):
         """Get the environment variable name for API key."""
         if self == JudgeProvider.DEEPSEEK:
             return "DEEPSEEK_API_KEY"
+        if self == JudgeProvider.OPENAI_COMPATIBLE:
+            return "OPENAI_COMPATIBLE_API_KEY"
+        if self == JudgeProvider.HUGGINGFACE_LOCAL:
+            return "HF_TOKEN"
         return "OPENAI_API_KEY"
+
+
+class _HFLocalMessage:
+    def __init__(self, content: str):
+        self.content = content
+
+
+class _HFLocalChoice:
+    def __init__(self, content: str):
+        self.message = _HFLocalMessage(content)
+
+
+class _HFLocalCompletionResponse:
+    def __init__(self, content: str):
+        self.choices = [_HFLocalChoice(content)]
+
+
+class _HFLocalModelsResponse:
+    def __init__(self, model_id: str):
+        self.data = [type("Model", (), {"id": model_id})()]
+
+
+class HuggingFaceLocalClient:
+    """Minimal OpenAI-like client backed by local Hugging Face generation."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key
+        self._loaded_model_id: Optional[str] = None
+        self._tokenizer = None
+        self._model = None
+        self.chat = type("Chat", (), {"completions": self})()
+        self.models = type("Models", (), {"list": self._list_models})()
+
+    def _list_models(self):
+        model_id = self._loaded_model_id or JudgeProvider.HUGGINGFACE_LOCAL.default_model
+        return _HFLocalModelsResponse(model_id)
+
+    def _ensure_loaded(self, model_id: str):
+        if self._loaded_model_id == model_id and self._model is not None and self._tokenizer is not None:
+            return
+
+        import os
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from pathlib import Path
+
+        cache_root = Path(os.environ.get("HF_HOME", "/tmp/cupcase_hf_cache"))
+        cache_root.mkdir(parents=True, exist_ok=True)
+        os.environ["HF_HOME"] = str(cache_root)
+        os.environ.setdefault("TRANSFORMERS_CACHE", str(cache_root / "transformers"))
+        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(cache_root / "hub"))
+
+        token = self.api_key or None
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            token=token,
+            trust_remote_code=True,
+            cache_dir=str(cache_root),
+        )
+        self._model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            token=token,
+            trust_remote_code=True,
+            torch_dtype=torch.float32,
+            cache_dir=str(cache_root),
+        )
+        self._model.eval()
+        self._loaded_model_id = model_id
+
+    def create(self, model: str, messages: List[Dict[str, str]], temperature: float = 0.0, **kwargs):
+        import torch
+
+        self._ensure_loaded(model)
+
+        if hasattr(self._tokenizer, "apply_chat_template") and self._tokenizer.chat_template:
+            prompt = self._tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        else:
+            prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages) + "\nassistant:"
+
+        inputs = self._tokenizer(prompt, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self._model.generate(
+                **inputs,
+                max_new_tokens=int(kwargs.get("max_tokens", 96)),
+                do_sample=temperature > 0,
+                temperature=max(temperature, 1e-5),
+                pad_token_id=self._tokenizer.eos_token_id,
+            )
+
+        generated = outputs[0][inputs["input_ids"].shape[1]:]
+        content = self._tokenizer.decode(generated, skip_special_tokens=True).strip()
+        return _HFLocalCompletionResponse(content)
 
 from .schema import (
     DiagnosticResponse,
@@ -493,7 +605,7 @@ def create_client(
     Factory function to create an OpenAI-compatible client for the specified provider.
     
     Args:
-        provider: The LLM provider to use (openai, deepseek)
+        provider: The LLM provider to use (openai, deepseek, openai_compatible, huggingface_local)
         api_key: Optional API key (uses environment variable if None)
         
     Returns:
@@ -506,9 +618,22 @@ def create_client(
     
     if api_key is None:
         api_key = os.environ.get(provider.env_var)
-    
-    if provider.base_url:
-        return OpenAI(api_key=api_key, base_url=provider.base_url)
+
+    if provider == JudgeProvider.HUGGINGFACE_LOCAL:
+        return HuggingFaceLocalClient(api_key=api_key)
+
+    if provider == JudgeProvider.OPENAI_COMPATIBLE and not api_key:
+        # Local vLLM / llama.cpp style servers commonly do not require auth.
+        api_key = "dummy"
+
+    base_url = provider.base_url
+    if provider == JudgeProvider.OPENAI_COMPATIBLE and not base_url:
+        raise ValueError(
+            "OPENAI_COMPATIBLE_BASE_URL must be set when provider=openai_compatible"
+        )
+
+    if base_url:
+        return OpenAI(api_key=api_key, base_url=base_url)
     return OpenAI(api_key=api_key)
 
 

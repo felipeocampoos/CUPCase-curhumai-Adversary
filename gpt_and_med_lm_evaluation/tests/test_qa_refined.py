@@ -114,3 +114,23 @@ def test_parse_args_preserves_explicit_model(monkeypatch):
     )
     args = parse_args()
     assert args.model == "custom-model"
+
+
+def test_parse_args_uses_env_default_model_for_openai_compatible(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_MODEL", "Qwen/Qwen3.5-35B")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["prog", "--provider", "openai_compatible"],
+    )
+    args = parse_args()
+    assert args.model == "Qwen/Qwen3.5-35B"
+
+
+def test_parse_args_uses_env_default_model_for_huggingface_local(monkeypatch):
+    monkeypatch.setenv("HUGGINGFACE_LOCAL_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["prog", "--provider", "huggingface_local"],
+    )
+    args = parse_args()
+    assert args.model == "Qwen/Qwen2.5-0.5B-Instruct"

@@ -56,7 +56,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=str, default="output/gpt4_multiple_choice_refined.csv")
     parser.add_argument("--variant", type=str, default="baseline", choices=VALID_VARIANTS)
     parser.add_argument("--model", type=str, default=None)
-    parser.add_argument("--provider", type=str, default="openai", choices=["openai", "deepseek"])
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default=JudgeProvider.OPENAI.value,
+        choices=[provider.value for provider in JudgeProvider],
+    )
     parser.add_argument("--n-batches", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=250)
     parser.add_argument("--random-seed", type=int, default=42)
