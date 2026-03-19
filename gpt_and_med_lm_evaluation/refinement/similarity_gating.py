@@ -147,11 +147,15 @@ def parse_candidate_set(text: str) -> CandidateSet:
         raise ValueError("Candidate payload must include at least 3 candidates")
 
     candidates: List[Candidate] = []
-    for item in payload[:3]:
+    seen_labels: set[str] = set()
+    for item in payload:
         if isinstance(item, dict):
             label = str(item.get("label", "")).strip()
             if not label:
                 raise ValueError("Candidate label cannot be empty")
+            key = label.casefold()
+            if key in seen_labels:
+                continue
             confidence = item.get("confidence")
             confidence_value = float(confidence) if confidence is not None else None
             evidence = item.get("evidence")
@@ -162,11 +166,22 @@ def parse_candidate_set(text: str) -> CandidateSet:
                     evidence=str(evidence) if evidence is not None else None,
                 )
             )
+            seen_labels.add(key)
         else:
             label = str(item).strip()
             if not label:
                 raise ValueError("Candidate label cannot be empty")
+            key = label.casefold()
+            if key in seen_labels:
+                continue
             candidates.append(Candidate(label=label))
+            seen_labels.add(key)
+
+        if len(candidates) == 3:
+            break
+
+    if len(candidates) < 3:
+        raise ValueError("Candidate payload must include at least 3 unique candidates")
 
     return CandidateSet(candidates=candidates, raw_response=text)
 

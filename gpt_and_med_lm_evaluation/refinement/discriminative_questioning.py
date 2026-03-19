@@ -73,11 +73,15 @@ def parse_ranked_candidates(text: str) -> RankedCandidateSet:
         raise ValueError("Expected at least 2 ranked candidates")
 
     candidates: List[RankedCandidate] = []
+    seen_labels: set[str] = set()
     for item in payload:
         if isinstance(item, dict):
             label = str(item.get("label", "")).strip()
             if not label:
                 raise ValueError("Candidate label cannot be empty")
+            key = label.casefold()
+            if key in seen_labels:
+                continue
             confidence = item.get("confidence")
             confidence_value = float(confidence) if confidence is not None else None
             rationale = item.get("rationale") or item.get("evidence")
@@ -88,11 +92,19 @@ def parse_ranked_candidates(text: str) -> RankedCandidateSet:
                     rationale=str(rationale).strip() if rationale is not None else None,
                 )
             )
+            seen_labels.add(key)
         else:
             label = str(item).strip()
             if not label:
                 raise ValueError("Candidate label cannot be empty")
+            key = label.casefold()
+            if key in seen_labels:
+                continue
             candidates.append(RankedCandidate(label=label))
+            seen_labels.add(key)
+
+    if len(candidates) < 2:
+        raise ValueError("Expected at least 2 unique ranked candidates")
 
     return RankedCandidateSet(candidates=candidates, raw_response=text)
 

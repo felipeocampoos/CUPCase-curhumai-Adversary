@@ -109,6 +109,21 @@ That's my response.
         assert response.final_diagnosis == "Acute myocardial infarction"
         assert len(response.differential) == 2
         assert len(response.next_steps) == 3
+
+    def test_parse_diagnostic_response_falls_back_from_leaked_template_heading(self):
+        text = """
+Construct Final Response:
+Acute appendicitis
+"""
+        response = parse_diagnostic_response(text)
+
+        assert response.final_diagnosis == "Acute appendicitis"
+
+    def test_parse_diagnostic_response_sanitizes_leaked_heading_inside_json_field(self):
+        text = '{"final_diagnosis": "Draft Output:\\nAcute pancreatitis", "next_steps": []}'
+        response = parse_diagnostic_response(text)
+
+        assert response.final_diagnosis == "Acute pancreatitis"
     
     def test_parse_critic_result(self):
         """Test parsing a critic result."""

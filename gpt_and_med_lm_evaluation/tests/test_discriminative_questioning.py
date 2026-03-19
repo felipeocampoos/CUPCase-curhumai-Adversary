@@ -27,6 +27,21 @@ def test_parse_ranked_candidates():
     assert parsed.candidates[0].label == "Dx A"
 
 
+def test_parse_ranked_candidates_deduplicates_labels():
+    text = """
+    {
+      "candidates": [
+        {"label": "Dx A", "confidence": 0.6},
+        {"label": "Dx A", "confidence": 0.3},
+        {"label": "Dx B", "confidence": 0.1}
+      ]
+    }
+    """
+    parsed = parse_ranked_candidates(text)
+
+    assert [candidate.label for candidate in parsed.candidates] == ["Dx A", "Dx B"]
+
+
 def test_parse_ranked_option_indices():
     parsed, rationale = parse_ranked_option_indices(
         '{"ranked_indices": [2, 4, 1], "rationale": "rank reason"}',

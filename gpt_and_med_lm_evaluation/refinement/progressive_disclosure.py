@@ -99,7 +99,8 @@ def parse_early_differential_free_text(text: str) -> EarlyDifferential:
         raise ValueError("Expected at least two candidates")
 
     candidates: List[EarlyCandidate] = []
-    for item in items[:3]:
+    seen_labels: set[str] = set()
+    for item in items:
         if not isinstance(item, dict):
             raise ValueError("candidate item must be object")
         label = str(item.get("label", "")).strip()
@@ -107,7 +108,16 @@ def parse_early_differential_free_text(text: str) -> EarlyDifferential:
         rationale = str(item.get("rationale", "")).strip()
         if not label:
             raise ValueError("candidate label is required")
+        key = label.casefold()
+        if key in seen_labels:
+            continue
         candidates.append(EarlyCandidate(label=label, confidence=confidence, rationale=rationale))
+        seen_labels.add(key)
+        if len(candidates) == 3:
+            break
+
+    if len(candidates) < 2:
+        raise ValueError("Expected at least two unique candidates")
 
     return EarlyDifferential(candidates=candidates, raw_response=text)
 

@@ -16,6 +16,75 @@ from pathlib import Path
 import yaml
 
 
+LEAKED_TEMPLATE_MARKERS = (
+    "construct final response",
+    "draft output",
+    "output generation",
+    "final response",
+    "assistant response",
+)
+
+
+def _is_template_marker_line(line: str) -> bool:
+    normalized = line.strip().strip(":").strip().lower()
+    return normalized in LEAKED_TEMPLATE_MARKERS
+
+
+def _sanitize_diagnosis_text(value: Any) -> str:
+    text = "" if value is None else str(value)
+    text = text.strip().strip("`").strip()
+    if not text:
+        return ""
+
+    label_patterns = (
+        r"(?im)^\s*(?:construct final response|draft output|output generation|final response|assistant response)\s*:?\s*",
+        r"(?im)^\s*(?:final diagnosis|diagnosis|final answer)\s*:?\s*",
+    )
+    for pattern in label_patterns:
+        text = re.sub(pattern, "", text).strip()
+
+    lines = [line.strip(" -*\t") for line in text.splitlines() if line.strip()]
+    cleaned_lines = [line for line in lines if not _is_template_marker_line(line)]
+    if cleaned_lines:
+        return cleaned_lines[0].strip()
+
+    return text.strip()
+
+
+def _fallback_free_text_diagnosis(text: str) -> "DiagnosticResponse":
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError("Cannot recover diagnosis from empty response")
+
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    for idx, line in enumerate(lines):
+        if _is_template_marker_line(line):
+            for next_line in lines[idx + 1 :]:
+                candidate = _sanitize_diagnosis_text(next_line)
+                if candidate and not _is_template_marker_line(candidate):
+                    return DiagnosticResponse(final_diagnosis=candidate, next_steps=[])
+
+        match = re.match(
+            r"(?i)^\s*(?:final diagnosis|diagnosis|final answer)\s*:?\s*(.+?)\s*$",
+            line,
+        )
+        if match:
+            candidate = _sanitize_diagnosis_text(match.group(1))
+            if candidate:
+                return DiagnosticResponse(final_diagnosis=candidate, next_steps=[])
+            for next_line in lines[idx + 1 :]:
+                candidate = _sanitize_diagnosis_text(next_line)
+                if candidate and not _is_template_marker_line(candidate):
+                    return DiagnosticResponse(final_diagnosis=candidate, next_steps=[])
+
+    for line in lines:
+        candidate = _sanitize_diagnosis_text(line)
+        if candidate and not _is_template_marker_line(candidate):
+            return DiagnosticResponse(final_diagnosis=candidate, next_steps=[])
+
+    raise ValueError(f"Could not recover diagnosis from response: {text[:200]}...")
+
+
 @dataclass
 class DiagnosticResponse:
     """Structured diagnostic response from Generator/Editor."""
@@ -41,7 +110,7 @@ class DiagnosticResponse:
         """Create from dictionary with validation."""
         # Handle missing or None values gracefully
         return cls(
-            final_diagnosis=data.get("final_diagnosis", ""),
+            final_diagnosis=_sanitize_diagnosis_text(data.get("final_diagnosis", "")),
             differential=data.get("differential"),
             conditional_reasoning=data.get("conditional_reasoning"),
             clarifying_questions=data.get("clarifying_questions"),
@@ -313,8 +382,15 @@ def parse_diagnostic_response(text: str) -> DiagnosticResponse:
     Raises:
         ValueError: If parsing fails
     """
-    data = extract_json_from_response(text)
-    return DiagnosticResponse.from_dict(data)
+    try:
+        data = extract_json_from_response(text)
+        response = DiagnosticResponse.from_dict(data)
+        if response.final_diagnosis:
+            return response
+    except ValueError:
+        pass
+
+    return _fallback_free_text_diagnosis(text)
 
 
 def parse_critic_result(text: str) -> CriticResult:
