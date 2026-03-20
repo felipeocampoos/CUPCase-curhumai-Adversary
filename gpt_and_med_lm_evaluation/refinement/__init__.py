@@ -13,6 +13,7 @@ from .refiner import IterativeRefiner, JudgeProvider, create_client, create_refi
 from .variant_factory import create_refiner_variant, list_refiner_variants
 from .variants import (
     DiscriminativeQuestionRefiner,
+    DifferentialAuditRefiner,
     DomainRoutedRefiner,
     HeuristicDomainRouter,
     ProgressiveDisclosureRefiner,
@@ -58,6 +59,16 @@ from .discriminative_questioning import (
     parse_answer_extraction,
     parse_integrated_decision_free_text,
 )
+from .differential_audit import (
+    ComparativeDecision,
+    ComparativeFreeTextOutput,
+    CounterHypothesisSet,
+    format_pooled_differential_for_prompt,
+    format_seed_candidates_for_prompt,
+    merge_differential_pool,
+    parse_comparative_evaluation_free_text,
+    parse_counter_hypotheses,
+)
 from .progressive_disclosure import (
     BeliefRevisionScores,
     EarlyCandidate,
@@ -99,6 +110,7 @@ __all__ = [
     "load_refinement_traces",
     "DomainRoutedRefiner",
     "DiscriminativeQuestionRefiner",
+    "DifferentialAuditRefiner",
     "ProgressiveDisclosureRefiner",
     "SemanticSimilarityGatedRefiner",
     "HeuristicDomainRouter",
@@ -119,6 +131,14 @@ __all__ = [
     "parse_discriminative_question",
     "parse_answer_extraction",
     "parse_integrated_decision_free_text",
+    "CounterHypothesisSet",
+    "ComparativeDecision",
+    "ComparativeFreeTextOutput",
+    "parse_counter_hypotheses",
+    "parse_comparative_evaluation_free_text",
+    "merge_differential_pool",
+    "format_seed_candidates_for_prompt",
+    "format_pooled_differential_for_prompt",
     "EarlyCandidate",
     "EarlyDifferential",
     "EarlyRankedOptions",
