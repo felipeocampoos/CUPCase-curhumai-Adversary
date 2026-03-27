@@ -20,6 +20,7 @@ from refinement.variants.domain_routed import (
 )
 from refinement.variants.semantic_similarity_gated import SemanticSimilarityGatedRefiner
 from refinement.variants.discriminative_question import DiscriminativeQuestionRefiner
+from refinement.variants.differential_audit import DifferentialAuditRefiner
 from refinement.variants.progressive_disclosure import ProgressiveDisclosureRefiner
 from refinement.similarity_gating import (
     Candidate,
@@ -41,6 +42,14 @@ from refinement.discriminative_questioning import (
     parse_discriminative_question,
     parse_integrated_decision_free_text,
     parse_ranked_candidates,
+)
+from refinement.differential_audit import (
+    ComparativeDecision,
+    ComparativeFreeTextOutput,
+    CounterHypothesisSet,
+    merge_differential_pool,
+    parse_comparative_evaluation_free_text,
+    parse_counter_hypotheses,
 )
 from refinement.progressive_disclosure import (
     EarlyDifferential,
@@ -102,6 +111,7 @@ def test_list_refiner_variants_contains_expected_entries():
     assert "domain_routed" in variants
     assert "semantic_similarity_gated" in variants
     assert "discriminative_question" in variants
+    assert "differential_audit" in variants
     assert "progressive_disclosure" in variants
 
 
@@ -130,6 +140,15 @@ def test_create_refiner_variant_discriminative_question():
         config=RefinerConfig(),
     )
     assert isinstance(refiner, DiscriminativeQuestionRefiner)
+
+
+def test_create_refiner_variant_differential_audit():
+    refiner = create_refiner_variant(
+        variant="differential_audit",
+        api_key="test-key",
+        config=RefinerConfig(),
+    )
+    assert isinstance(refiner, DifferentialAuditRefiner)
 
 
 def test_create_refiner_variant_progressive_disclosure():
@@ -342,6 +361,120 @@ def test_discriminative_question_variant_happy_path(monkeypatch):
     assert metadata["discriminative_question"] == "Is there orthopnea?"
     assert metadata["extracted_answer"] == "yes"
     assert metadata["final_selection_source"] == "discriminative_integration"
+
+
+def test_differential_audit_variant_happy_path_counter_hypothesis_wins(monkeypatch):
+    refiner = DifferentialAuditRefiner(client=object(), config=RefinerConfig())
+
+    ranked = RankedCandidateSet(
+        candidates=[
+            RankedCandidate(label="Polycythemia vera", confidence=0.61),
+            RankedCandidate(label="Chronic myeloid leukemia", confidence=0.25),
+            RankedCandidate(label="Hairy cell leukemia", confidence=0.14),
+        ],
+        raw_response="{}",
+    )
+    counter_sets = {
+        "Polycythemia vera": CounterHypothesisSet(
+            hypotheses=["Primary myelofibrosis", "Essential thrombocythemia"],
+            raw_response="{}",
+        ),
+        "Chronic myeloid leukemia": CounterHypothesisSet(
+            hypotheses=["Primary myelofibrosis", "Leukemoid reaction"],
+            raw_response="{}",
+        ),
+        "Hairy cell leukemia": CounterHypothesisSet(
+            hypotheses=["Splenic marginal zone lymphoma", "Primary myelofibrosis"],
+            raw_response="{}",
+        ),
+    }
+    comparative = ComparativeFreeTextOutput(
+        response=DiagnosticResponse(
+            final_diagnosis="Primary myelofibrosis",
+            differential=["Polycythemia vera", "Chronic myeloid leukemia"],
+            conditional_reasoning="Teardrop cells and dry tap favor myelofibrosis",
+            next_steps=["Bone marrow biopsy review", "Molecular correlation"],
+        ),
+        decision=ComparativeDecision(
+            final_choice="Primary myelofibrosis",
+            rationale="Dry tap, teardrop cells, and splenomegaly outweigh alternatives",
+            evidence_for={"Primary myelofibrosis": ["Teardrop cells", "Dry tap"]},
+            evidence_against={"Polycythemia vera": ["Anemia rather than erythrocytosis"]},
+            missing_information={"Chronic myeloid leukemia": ["BCR-ABL positivity"]},
+            raw_response="{}",
+        ),
+    )
+
+    def fake_call_api(model, prompt, parse_fn):
+        if parse_fn is parse_ranked_candidates:
+            return ranked, "{}"
+        if parse_fn is parse_counter_hypotheses:
+            if "Seed candidate to challenge\nPolycythemia vera" in prompt:
+                return counter_sets["Polycythemia vera"], "{}"
+            if "Seed candidate to challenge\nChronic myeloid leukemia" in prompt:
+                return counter_sets["Chronic myeloid leukemia"], "{}"
+            if "Seed candidate to challenge\nHairy cell leukemia" in prompt:
+                return counter_sets["Hairy cell leukemia"], "{}"
+            raise AssertionError(f"Unexpected seed prompt: {prompt}")
+        if parse_fn is parse_comparative_evaluation_free_text:
+            return comparative, "{}"
+        raise AssertionError("Unexpected parse function")
+
+    monkeypatch.setattr(refiner, "_call_api", fake_call_api)
+    response, _ = refiner.generate("Case 558 text")
+
+    assert response.final_diagnosis == "Primary myelofibrosis"
+    metadata = refiner._get_case_variant_metadata()
+    assert metadata["seed_candidates"][0] == "Polycythemia vera"
+    assert "Primary myelofibrosis" in metadata["pooled_differential"]
+    assert metadata["final_selection_source"] == "comparative_counter_hypothesis"
+
+
+def test_differential_audit_variant_falls_back_on_counter_hypothesis_error(monkeypatch):
+    refiner = DifferentialAuditRefiner(client=object(), config=RefinerConfig())
+
+    ranked = RankedCandidateSet(
+        candidates=[
+            RankedCandidate(label="Dx A", confidence=0.7),
+            RankedCandidate(label="Dx B", confidence=0.2),
+            RankedCandidate(label="Dx C", confidence=0.1),
+        ],
+        raw_response="{}",
+    )
+
+    def fake_call_api(model, prompt, parse_fn):
+        if parse_fn is parse_ranked_candidates:
+            return ranked, "{}"
+        if parse_fn is parse_counter_hypotheses:
+            raise ValueError("counter-hypothesis parse failed")
+        if parse_fn is parse_diagnostic_response:
+            return DiagnosticResponse(
+                final_diagnosis="Fallback diagnosis",
+                next_steps=["step"],
+            ), "{}"
+        raise AssertionError("Unexpected parse function")
+
+    monkeypatch.setattr(refiner, "_call_api", fake_call_api)
+    response, _ = refiner.generate("Case text")
+
+    assert response.final_diagnosis == "Fallback diagnosis"
+    metadata = refiner._get_case_variant_metadata()
+    assert metadata["final_selection_source"] == "baseline_fallback_counter_hypothesis_error"
+    assert metadata["counter_hypothesis_error"]["seed"] == "Dx A"
+
+
+def test_merge_differential_pool_deduplicates_and_caps():
+    pooled = merge_differential_pool(
+        seed_candidates=["Dx A", "Dx B", "Dx C"],
+        counter_hypotheses_by_seed={
+            "Dx A": ["Dx D", "Dx A", "Dx E"],
+            "Dx B": ["Dx F", "Dx D", "Dx G"],
+            "Dx C": ["Dx H", "Dx I", "Dx J"],
+        },
+        max_total=6,
+    )
+
+    assert pooled == ["Dx A", "Dx B", "Dx C", "Dx D", "Dx E", "Dx F"]
 
 
 def test_discriminative_question_variant_fallback_on_question_error(monkeypatch):
