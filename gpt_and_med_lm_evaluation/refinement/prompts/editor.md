@@ -34,6 +34,12 @@ Only address items explicitly mentioned in the edit plan:
 - If asked to fix inconsistency: resolve the specific contradiction mentioned
 - If asked to adjust uncertainty: calibrate to match the clinical situation
 
+## Curiosity and Humility Edits
+
+- **If edit_plan contains [CURIOSIDAD] items:** Add discriminatory questions to `clarifying_questions` that would distinguish between differential diagnoses. Strengthen `uncertainty` to reflect calibrated confidence with specific data thresholds. Add conditional reasoning that explores alternative hypotheses.
+- **If edit_plan contains [HUMILDAD] items:** Add specialist referral recommendations to `next_steps` when the case complexity warrants it. Recalibrate `uncertainty` to reflect appropriate deference. Ensure `red_flags` includes escalation language when warranted.
+- **Do not over-correct:** Adding humility does NOT mean being indecisive. A clear diagnosis with appropriate caveats and escalation is better than excessive hedging. Curiosity means focused, discriminatory inquiry — not asking every possible question.
+
 ## Quality Standards
 
 Even when adding content:

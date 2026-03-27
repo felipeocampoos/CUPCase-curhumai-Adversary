@@ -177,7 +177,9 @@ class CriticResult:
     clinical_quality: ClinicalQuality
     hard_fail: HardFail
     edit_plan: List[str]
-    
+    curiosity_score: Optional[int] = None
+    humility_score: Optional[int] = None
+
     def is_compliant(self, quality_threshold: int = 3) -> bool:
         """Check if response meets joint compliance criteria."""
         all_passed = all(item.passed for item in self.checklist)
@@ -214,6 +216,8 @@ class CriticResult:
                 "reason": self.hard_fail.reason,
             },
             "edit_plan": self.edit_plan,
+            "curiosity_score": self.curiosity_score,
+            "humility_score": self.humility_score,
         }
     
     @classmethod
@@ -234,6 +238,8 @@ class CriticResult:
             clinical_quality=clinical_quality,
             hard_fail=hard_fail,
             edit_plan=edit_plan,
+            curiosity_score=data.get("curiosity_score"),
+            humility_score=data.get("humility_score"),
         )
 
 
@@ -269,6 +275,8 @@ class RefinementTrace:
     checklist_pass_map: Dict[str, bool] = field(default_factory=dict)
     clinical_quality_score: Optional[int] = None
     hard_fail: bool = False
+    curiosity_score: Optional[int] = None
+    humility_score: Optional[int] = None
     variant_name: str = "baseline"
     variant_metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -287,6 +295,8 @@ class RefinementTrace:
             "checklist_pass_map": self.checklist_pass_map,
             "clinical_quality_score": self.clinical_quality_score,
             "hard_fail": self.hard_fail,
+            "curiosity_score": self.curiosity_score,
+            "humility_score": self.humility_score,
             "variant_name": self.variant_name,
             "variant_metadata": self.variant_metadata,
         }
@@ -318,6 +328,8 @@ class RefinementTrace:
             checklist_pass_map=data.get("checklist_pass_map", {}),
             clinical_quality_score=data.get("clinical_quality_score"),
             hard_fail=data.get("hard_fail", False),
+            curiosity_score=data.get("curiosity_score"),
+            humility_score=data.get("humility_score"),
             variant_name=data.get("variant_name", "baseline"),
             variant_metadata=data.get("variant_metadata", {}),
         )

@@ -47,13 +47,15 @@ class CCRMetrics:
     ccr_all: float
     ccr_q: float
     ccr_h: float
+    ccr_curhum: float
     per_item_rates: Dict[str, float]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "CCR_all": self.ccr_all,
             "CCR_Q": self.ccr_q,
             "CCR_H": self.ccr_h,
+            "CCR_CurHum": self.ccr_curhum,
             "per_item_rates": self.per_item_rates,
         }
 
@@ -189,32 +191,14 @@ def compute_ccr_for_case(
     Returns:
         Dict with CCR_all, CCR_Q, CCR_H as booleans
     """
-    # CCR_all: all items must pass
-    ccr_all_items = config.get_ccr_group_items("CCR_all")
-    ccr_all = all(
-        checklist_pass_map.get(item_id, False)
-        for item_id in ccr_all_items
-    )
-    
-    # CCR_Q: quality subset
-    ccr_q_items = config.get_ccr_group_items("CCR_Q")
-    ccr_q = all(
-        checklist_pass_map.get(item_id, False)
-        for item_id in ccr_q_items
-    ) if ccr_q_items else True
-    
-    # CCR_H: safety/health subset
-    ccr_h_items = config.get_ccr_group_items("CCR_H")
-    ccr_h = all(
-        checklist_pass_map.get(item_id, False)
-        for item_id in ccr_h_items
-    ) if ccr_h_items else True
-    
-    return {
-        "CCR_all": ccr_all,
-        "CCR_Q": ccr_q,
-        "CCR_H": ccr_h,
-    }
+    result = {}
+    for group_name, group in config.ccr_groups.items():
+        group_items = group.items
+        result[group_name] = all(
+            checklist_pass_map.get(item_id, False)
+            for item_id in group_items
+        ) if group_items else True
+    return result
 
 
 def compute_ccr_metrics(
@@ -239,46 +223,43 @@ def compute_ccr_metrics(
             ccr_all=0.0,
             ccr_q=0.0,
             ccr_h=0.0,
+            ccr_curhum=0.0,
             per_item_rates={},
         )
-    
+
     # Count compliance per CCR group
-    ccr_all_count = 0
-    ccr_q_count = 0
-    ccr_h_count = 0
-    
+    group_counts: Dict[str, int] = {}
+    for group_name in config.ccr_groups:
+        group_counts[group_name] = 0
+
     # Track per-item pass rates
     item_pass_counts: Dict[str, int] = {}
-    
+
     for trace in traces:
-        # Compute CCR for this case
         case_ccr = compute_ccr_for_case(trace.checklist_pass_map, config)
-        
-        if case_ccr["CCR_all"]:
-            ccr_all_count += 1
-        if case_ccr["CCR_Q"]:
-            ccr_q_count += 1
-        if case_ccr["CCR_H"]:
-            ccr_h_count += 1
-        
-        # Track per-item rates
+
+        for group_name, passed in case_ccr.items():
+            if passed:
+                group_counts[group_name] = group_counts.get(group_name, 0) + 1
+
         for item_id, passed in trace.checklist_pass_map.items():
             if item_id not in item_pass_counts:
                 item_pass_counts[item_id] = 0
             if passed:
                 item_pass_counts[item_id] += 1
-    
+
     n_cases = len(traces)
-    
+
     per_item_rates = {
         item_id: count / n_cases
         for item_id, count in item_pass_counts.items()
     }
-    
+
     return CCRMetrics(
-        ccr_all=ccr_all_count / n_cases,
-        ccr_q=ccr_q_count / n_cases,
-        ccr_h=ccr_h_count / n_cases,
+        ccr_all=group_counts.get("CCR_all", 0) / n_cases,
+        ccr_q=group_counts.get("CCR_Q", 0) / n_cases,
+        ccr_h=group_counts.get("CCR_H", 0) / n_cases,
+        ccr_curhum=group_counts.get("CCR_CurHum", 0) / n_cases,
         per_item_rates=per_item_rates,
     )
 
@@ -388,6 +369,48 @@ def compute_compliance_rate(traces: List[RefinementTrace]) -> float:
     """Compute overall compliance rate across cases."""
     if not traces:
         return 0.0
-    
+
     compliant_count = sum(1 for trace in traces if trace.is_compliant)
     return compliant_count / len(traces)
+
+
+def compute_curiosity_humility_stats(
+    traces: List[RefinementTrace],
+) -> Dict[str, float]:
+    """
+    Compute statistics on curiosity and humility scores.
+
+    Args:
+        traces: List of RefinementTrace objects
+
+    Returns:
+        Dict with mean, min, max for each score
+    """
+    curiosity_scores = [
+        t.curiosity_score for t in traces if t.curiosity_score is not None
+    ]
+    humility_scores = [
+        t.humility_score for t in traces if t.humility_score is not None
+    ]
+
+    result: Dict[str, float] = {}
+
+    if curiosity_scores:
+        result["mean_curiosity_score"] = sum(curiosity_scores) / len(curiosity_scores)
+        result["min_curiosity_score"] = float(min(curiosity_scores))
+        result["max_curiosity_score"] = float(max(curiosity_scores))
+    else:
+        result["mean_curiosity_score"] = 0.0
+        result["min_curiosity_score"] = 0.0
+        result["max_curiosity_score"] = 0.0
+
+    if humility_scores:
+        result["mean_humility_score"] = sum(humility_scores) / len(humility_scores)
+        result["min_humility_score"] = float(min(humility_scores))
+        result["max_humility_score"] = float(max(humility_scores))
+    else:
+        result["mean_humility_score"] = 0.0
+        result["min_humility_score"] = 0.0
+        result["max_humility_score"] = 0.0
+
+    return result

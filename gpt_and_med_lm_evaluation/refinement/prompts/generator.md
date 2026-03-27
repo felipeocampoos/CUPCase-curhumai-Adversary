@@ -31,9 +31,9 @@ Return ONLY a valid JSON object with the following structure:
 - **final_diagnosis**: Required. One clear, specific diagnosis. This is what will be scored.
 - **differential**: Optional list (2-4 items). Include when clinical picture is uncertain.
 - **conditional_reasoning**: Optional string. Use when multiple diagnostic/treatment pathways exist.
-- **clarifying_questions**: Optional list (1-3 items). Ask only when critical information is missing.
-- **red_flags**: Optional list. Include only genuinely urgent/critical findings requiring immediate attention.
-- **uncertainty**: Optional string. Express confidence level honestly; don't claim certainty when data is limited.
+- **clarifying_questions**: Optional list (1-3 items). Ask only when critical information is missing. Questions should be discriminatory — designed to distinguish between differential diagnoses, not generic. Focus on information that would materially change the diagnosis.
+- **red_flags**: Optional list. Include only genuinely urgent/critical findings requiring immediate attention. When red flags are severe or the case exceeds your scope, recommend specialist referral in next_steps.
+- **uncertainty**: Optional string. Express confidence level honestly; don't claim certainty when data is limited. Include what specific data would change your confidence. Mention at least one scenario where your primary diagnosis could be wrong.
 - **next_steps**: Required list (1-4 items). Concrete, actionable recommendations for workup/management.
 
 ## Important Rules

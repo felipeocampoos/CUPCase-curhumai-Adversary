@@ -444,11 +444,12 @@ class TestChecklistConfig:
         """Test loading the default checklist config."""
         config = ChecklistConfig.load()
         
-        assert config.version == "1.0"
+        assert config.version == "1.1"
         assert len(config.items) == 8
         assert "CCR_all" in config.ccr_groups
         assert "CCR_Q" in config.ccr_groups
         assert "CCR_H" in config.ccr_groups
+        assert "CCR_CurHum" in config.ccr_groups
     
     def test_ccr_groups_have_items(self):
         """Test that CCR groups have the expected items."""
@@ -467,6 +468,125 @@ class TestChecklistConfig:
         assert item is not None
         assert item.id == "C1"
         assert item.name == "Primary Diagnosis"
+
+
+class TestCuriosityHumilityScores:
+    """Tests for curiosity and humility score support."""
+
+    def test_critic_result_backward_compat_missing_scores(self):
+        """CriticResult.from_dict handles missing curiosity/humility scores."""
+        data = {
+            "checklist": [{"item_id": "C1", "pass": True, "rationale": "ok"}],
+            "clinical_quality": {"score": 4, "rationale": "good"},
+            "hard_fail": {"failed": False},
+            "edit_plan": [],
+        }
+        result = CriticResult.from_dict(data)
+        assert result.curiosity_score is None
+        assert result.humility_score is None
+
+    def test_critic_result_parses_scores(self):
+        """CriticResult.from_dict parses curiosity/humility scores."""
+        data = {
+            "checklist": [{"item_id": "C1", "pass": True, "rationale": "ok"}],
+            "clinical_quality": {"score": 4, "rationale": "good"},
+            "hard_fail": {"failed": False},
+            "edit_plan": [],
+            "curiosity_score": 3,
+            "humility_score": 5,
+        }
+        result = CriticResult.from_dict(data)
+        assert result.curiosity_score == 3
+        assert result.humility_score == 5
+
+    def test_critic_result_to_dict_includes_scores(self):
+        """CriticResult.to_dict includes curiosity/humility scores."""
+        result = CriticResult(
+            checklist=[],
+            clinical_quality=ClinicalQuality(score=4, rationale="good"),
+            hard_fail=HardFail(failed=False),
+            edit_plan=[],
+            curiosity_score=2,
+            humility_score=4,
+        )
+        d = result.to_dict()
+        assert d["curiosity_score"] == 2
+        assert d["humility_score"] == 4
+
+    def test_compliance_not_affected_by_scores(self):
+        """is_compliant() is NOT affected by curiosity/humility scores."""
+        items = [
+            ChecklistItemResult(item_id=f"C{i}", passed=True, rationale="ok")
+            for i in range(1, 9)
+        ]
+        result = CriticResult(
+            checklist=items,
+            clinical_quality=ClinicalQuality(score=4, rationale="good"),
+            hard_fail=HardFail(failed=False),
+            edit_plan=[],
+            curiosity_score=0,
+            humility_score=0,
+        )
+        assert result.is_compliant(quality_threshold=3) is True
+
+    def test_ccr_curhum_group(self):
+        """CCR_CurHum group includes C3, C4, C6."""
+        config = ChecklistConfig.load()
+        curhum_items = config.get_ccr_group_items("CCR_CurHum")
+        assert set(curhum_items) == {"C3", "C4", "C6"}
+
+    def test_ccr_curhum_computation(self):
+        """compute_ccr_for_case computes CCR_CurHum correctly."""
+        config = ChecklistConfig.load()
+        pass_map_all = {f"C{i}": True for i in range(1, 9)}
+        result = compute_ccr_for_case(pass_map_all, config)
+        assert result["CCR_CurHum"] is True
+
+        pass_map_fail_c3 = {f"C{i}": True for i in range(1, 9)}
+        pass_map_fail_c3["C3"] = False
+        result2 = compute_ccr_for_case(pass_map_fail_c3, config)
+        assert result2["CCR_CurHum"] is False
+
+    def test_refinement_trace_round_trip(self):
+        """RefinementTrace serializes/deserializes curiosity/humility scores."""
+        from refinement.schema import DiagnosticResponse, RefinementTrace
+
+        trace = RefinementTrace(
+            case_id="test",
+            case_text="test case",
+            true_diagnosis="test dx",
+            final_response=DiagnosticResponse(final_diagnosis="dx", next_steps=[]),
+            extracted_final_diagnosis="dx",
+            iterations_to_compliance=1,
+            is_compliant=True,
+            iterations=[],
+            curiosity_score=3,
+            humility_score=4,
+        )
+        d = trace.to_dict()
+        assert d["curiosity_score"] == 3
+        assert d["humility_score"] == 4
+
+        restored = RefinementTrace.from_dict(d)
+        assert restored.curiosity_score == 3
+        assert restored.humility_score == 4
+
+    def test_refinement_trace_backward_compat(self):
+        """Old traces without curiosity/humility scores deserialize correctly."""
+        from refinement.schema import RefinementTrace
+
+        data = {
+            "case_id": "old",
+            "case_text": "old case",
+            "true_diagnosis": "dx",
+            "final_response": {"final_diagnosis": "dx"},
+            "extracted_final_diagnosis": "dx",
+            "is_compliant": True,
+            "iterations": [],
+        }
+        trace = RefinementTrace.from_dict(data)
+        assert trace.curiosity_score is None
+        assert trace.humility_score is None
 
 
 if __name__ == "__main__":

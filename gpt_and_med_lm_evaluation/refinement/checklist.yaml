@@ -2,7 +2,7 @@
 # This file defines the 8-item checklist for diagnostic response evaluation
 # and groupings for CCR metrics (CCR_all, CCR_Q, CCR_H)
 
-version: "1.0"
+version: "1.1"
 
 # Checklist items definition
 # Each item has:
@@ -40,28 +40,32 @@ checklist_items:
       - "Empty differential when case is ambiguous"
 
   - id: "C3"
-    name: "Clarifying Questions"
-    description: "Asks relevant clarifying questions when key information is missing"
+    name: "Clarifying Questions (Curiosity)"
+    description: "Asks discriminatory clarifying questions that narrow the differential; recognizes incomplete information and actively seeks data to reduce uncertainty rather than settling on the first hypothesis"
     when_required: "when_information_missing"
     json_field: "clarifying_questions"
     examples_good:
-      - "What is the patient's vaccination history?"
-      - "Are there any recent travel exposures?"
+      - "Has the patient traveled to endemic areas? (discriminates tropical infections from local causes)"
+      - "What is the time course of symptom onset? (distinguishes acute from chronic processes)"
+      - "Any family history of autoimmune disease? (explores atypical presentations)"
     examples_bad:
-      - "Irrelevant questions about unrelated symptoms"
-      - "No questions when critical info is missing"
+      - "No questions despite missing critical labs or imaging"
+      - "Generic questions unrelated to narrowing the differential (e.g., 'How are you feeling?')"
+      - "Settling on first hypothesis without asking questions that could distinguish alternatives"
 
   - id: "C4"
-    name: "Uncertainty Acknowledgment"
-    description: "Appropriately expresses uncertainty when clinical data is incomplete or ambiguous"
+    name: "Uncertainty Acknowledgment (Curiosity)"
+    description: "Calibrates confidence proportionally to available evidence; explicitly identifies which data would change the diagnosis; explores competing hypotheses rather than anchoring on one; considers atypical presentations and physiological mechanisms"
     when_required: "when_uncertainty_exists"
     json_field: "uncertainty"
     examples_good:
-      - "Moderate confidence; would confirm with imaging"
-      - "Differential is broad given limited labs"
+      - "Moderate confidence (60-70%); would increase to >90% if CT shows appendicolith"
+      - "Cannot rule out meningitis without LP results; atypical viral presentation also possible"
+      - "Three scenarios remain: if CRP elevated, likely bacterial; if normal, viral; if imaging shows mass, consider malignancy"
     examples_bad:
-      - "100% certain of rare diagnosis with limited data"
-      - "No uncertainty expressed for ambiguous case"
+      - "States '95% confident' with only history and physical exam for a complex presentation"
+      - "Does not mention any scenario where the primary diagnosis could be wrong"
+      - "Ignores atypical features that don't fit the leading diagnosis"
 
   - id: "C5"
     name: "Conditional Reasoning"
@@ -76,16 +80,18 @@ checklist_items:
       - "Rigid single pathway when flexibility needed"
 
   - id: "C6"
-    name: "Red Flags Identification"
-    description: "Identifies critical red flags and safety concerns requiring immediate attention"
+    name: "Red Flags & Specialist Deferral (Humility)"
+    description: "Identifies critical red flags and safety concerns; when complexity or severity exceeds primary care scope, explicitly recommends specialist referral or deferral rather than attempting definitive diagnosis"
     when_required: "when_safety_relevant"
     json_field: "red_flags"
     examples_good:
-      - "Red flags: chest pain, shortness of breath, syncope"
-      - "Warning signs: altered mental status, hypotension"
+      - "Red flags: thunderclap headache, papilledema - recommend urgent neurology/neurosurgery consult"
+      - "Complexity exceeds initial assessment: recommend cardiology evaluation given multiple risk factors and atypical ECG"
+      - "Warning: altered mental status with fever - immediate ED evaluation, defer definitive diagnosis to inpatient team"
     examples_bad:
-      - "Missing obvious emergency signs"
-      - "Listing non-urgent findings as red flags"
+      - "Lists red flags but provides definitive diagnosis for a case clearly requiring specialist evaluation"
+      - "Identifies critical findings but does not recommend escalation or referral"
+      - "Prematurely dismisses alternative diagnoses that could represent dangerous conditions"
 
   - id: "C7"
     name: "Next Steps"
@@ -128,6 +134,10 @@ ccr_groups:
   CCR_H:
     description: "Health/safety subset - red flags and actionable guidance"
     items: ["C6", "C7", "C8"]
+
+  CCR_CurHum:
+    description: "Curiosity and humility subset - discriminatory questioning, uncertainty calibration, and appropriate deferral"
+    items: ["C3", "C4", "C6"]
 
 # Clinical quality scoring configuration
 clinical_quality:

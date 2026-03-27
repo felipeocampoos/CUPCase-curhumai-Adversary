@@ -509,7 +509,9 @@ class IterativeRefiner:
         checklist_pass_map = {}
         clinical_quality_score = None
         hard_fail = False
-        
+        curiosity_score = None
+        humility_score = None
+
         if final_critic:
             checklist_pass_map = {
                 item.item_id: item.passed
@@ -517,6 +519,8 @@ class IterativeRefiner:
             }
             clinical_quality_score = final_critic.clinical_quality.score
             hard_fail = final_critic.hard_fail.failed
+            curiosity_score = final_critic.curiosity_score
+            humility_score = final_critic.humility_score
         
         # Build trace
         trace = RefinementTrace(
@@ -532,6 +536,8 @@ class IterativeRefiner:
             checklist_pass_map=checklist_pass_map,
             clinical_quality_score=clinical_quality_score,
             hard_fail=hard_fail,
+            curiosity_score=curiosity_score,
+            humility_score=humility_score,
             variant_name=self.variant_name,
             variant_metadata=self._get_case_variant_metadata(),
         )
@@ -593,7 +599,9 @@ class IterativeRefiner:
                 failed=True,
                 reason="Response format could not be parsed",
             ),
-            edit_plan=["Fix response format to valid JSON with required fields"],
+            edit_plan=["[GENERAL] Fix response format to valid JSON with required fields"],
+            curiosity_score=0,
+            humility_score=0,
         )
 
 

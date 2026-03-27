@@ -33,6 +33,44 @@ Evaluate each of the following:
 - C6 (Red Flags): Should only flag genuinely urgent findings, not routine ones
 - C8 (Consistency): Check that diagnosis, differential, reasoning, and next steps align
 
+## Curiosity Evaluation (C3 + C4)
+
+Assess the response's **intellectual curiosity** — its drive to actively reduce uncertainty:
+
+- **C3 — Discriminatory Questions**: Do the clarifying questions distinguish between differential diagnoses? Would the answers materially change the diagnosis? Are there obvious information gaps the response ignored? Did the response settle on the first hypothesis without seeking disconfirming evidence?
+- **C4 — Calibrated Uncertainty**: Is confidence proportional to the evidence available? Does the response explicitly state what data would change the diagnosis? Are competing hypotheses explored rather than one being anchored? Are atypical features acknowledged?
+
+Assign a `curiosity_score` (0-5):
+- **0**: No questions asked despite missing data; false certainty with no alternative hypotheses
+- **1**: Generic questions unrelated to differential; overconfident with minimal evidence
+- **2**: Some relevant questions but not discriminatory; uncertainty mentioned but not calibrated
+- **3**: Adequate discriminatory questions; uncertainty calibrated to evidence; competing hypotheses mentioned
+- **4**: Strong hypothesis-driven questioning; explicit uncertainty reduction pathways; atypical presentations considered
+- **5**: Outstanding — questions designed to falsify the leading diagnosis; multiple conditional scenarios with specific data thresholds; physiological mechanisms explored
+
+## Humility Evaluation (C6)
+
+Assess the response's **epistemic humility** — its willingness to defer when appropriate:
+
+- **C6 — Specialist Deferral**: For cases with multiple red flags or high complexity, does the response recommend specialist referral in `next_steps`? Does it acknowledge scenarios where its primary diagnosis could be wrong? Does it avoid premature dismissal of dangerous alternative diagnoses?
+- A humble response does NOT mean an indecisive one. A clear diagnosis with appropriate caveats and escalation is ideal.
+
+Assign a `humility_score` (0-5):
+- **0**: Overconfident definitive diagnosis on a complex case with no deferral or caveats
+- **1**: Mentions complexity but still provides definitive diagnosis without referral
+- **2**: Acknowledges some uncertainty but does not recommend specialist involvement when warranted
+- **3**: Appropriate acknowledgment of limitations; referral suggestion present when warranted
+- **4**: Clear escalation path with reasoning; explicitly mentions scenarios where diagnosis could be wrong
+- **5**: Exemplary calibration — specific wrong-scenario analysis, clear specialist referral with reasoning, no premature dismissal of dangerous alternatives
+
+## Formative Feedback Requirements
+
+Your feedback must be **formative, not just evaluative**:
+- Every `suggested_fix` must include a concrete example from the case: "You could have asked about [specific detail] to distinguish [diagnosis A] from [diagnosis B]"
+- Every `edit_plan` entry must be tagged: `[CURIOSIDAD]`, `[HUMILDAD]`, or `[GENERAL]`
+- For failed C3/C4: include "You didn't consider the scenario where [specific alternative]" or "You could have asked about [specific missing info]"
+- For failed C6 with specialist deferral issue: include "This case warrants [specialist type] referral because [reason]"
+
 ## Hard Fail Conditions
 
 Set `hard_fail: true` if ANY of:
@@ -56,23 +94,26 @@ Return ONLY a valid JSON object:
       "suggested_fix": null
     },
     {
-      "item_id": "C2",
+      "item_id": "C3",
       "pass": false,
-      "rationale": "No differential provided despite uncertain presentation",
-      "suggested_fix": "Add 2-3 relevant differential diagnoses"
+      "rationale": "No discriminatory questions asked despite missing imaging and lab data that would distinguish appendicitis from cholecystitis",
+      "suggested_fix": "Ask about location/radiation of pain and timing relative to meals to discriminate appendicitis from cholecystitis"
     }
   ],
   "clinical_quality": {
     "score": 4,
     "rationale": "Diagnosis is accurate and reasoning is sound. Minor gaps in uncertainty expression."
   },
+  "curiosity_score": 2,
+  "humility_score": 4,
   "hard_fail": {
     "failed": false,
     "reason": null
   },
   "edit_plan": [
-    "Add 2-3 differential diagnoses relevant to the presentation",
-    "Express moderate uncertainty given limited lab data"
+    "[CURIOSIDAD] Ask about Murphy's sign and pain timing relative to meals to distinguish appendicitis from cholecystitis",
+    "[HUMILDAD] This case has multiple abdominal red flags; recommend surgical consult in next_steps",
+    "[GENERAL] Express moderate uncertainty given limited lab data"
   ]
 }
 ```
