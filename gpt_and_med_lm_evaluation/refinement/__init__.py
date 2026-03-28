@@ -36,6 +36,7 @@ from .metrics import (
     compute_clinical_quality_stats,
     compute_hard_fail_rate,
     compute_compliance_rate,
+    compute_curiosity_humility_stats,
 )
 from .stats import paired_bootstrap_ci, paired_permutation_test
 from .io import JSONLLogger, load_refinement_traces
@@ -104,6 +105,7 @@ __all__ = [
     "compute_clinical_quality_stats",
     "compute_hard_fail_rate",
     "compute_compliance_rate",
+    "compute_curiosity_humility_stats",
     "paired_bootstrap_ci",
     "paired_permutation_test",
     "JSONLLogger",

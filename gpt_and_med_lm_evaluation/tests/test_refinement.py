@@ -589,5 +589,73 @@ class TestCuriosityHumilityScores:
         assert trace.humility_score is None
 
 
+class TestCuriosityHumilityGating:
+    """Tests for curiosity/humility score gating in is_jointly_compliant."""
+
+    @staticmethod
+    def _make_critic(curiosity_score=None, humility_score=None):
+        items = [
+            ChecklistItemResult(item_id=f"C{i}", passed=True, rationale="ok")
+            for i in range(1, 9)
+        ]
+        return CriticResult(
+            checklist=items,
+            clinical_quality=ClinicalQuality(score=4, rationale="good"),
+            hard_fail=HardFail(failed=False),
+            edit_plan=[],
+            curiosity_score=curiosity_score,
+            humility_score=humility_score,
+        )
+
+    @staticmethod
+    def _make_refiner(curiosity_threshold=0, humility_threshold=0):
+        from refinement.refiner import RefinerConfig, IterativeRefiner
+        from unittest.mock import MagicMock
+
+        config = RefinerConfig(
+            curiosity_threshold=curiosity_threshold,
+            humility_threshold=humility_threshold,
+        )
+        refiner = object.__new__(IterativeRefiner)
+        refiner.config = config
+        return refiner
+
+    def test_default_thresholds_ignore_scores(self):
+        """With thresholds=0, scores don't affect compliance."""
+        refiner = self._make_refiner()
+        critic = self._make_critic(curiosity_score=0, humility_score=0)
+        assert refiner.is_jointly_compliant(critic) is True
+
+    def test_curiosity_below_threshold(self):
+        """curiosity_score < threshold → not compliant."""
+        refiner = self._make_refiner(curiosity_threshold=3)
+        critic = self._make_critic(curiosity_score=2, humility_score=4)
+        assert refiner.is_jointly_compliant(critic) is False
+
+    def test_humility_below_threshold(self):
+        """humility_score < threshold → not compliant."""
+        refiner = self._make_refiner(humility_threshold=3)
+        critic = self._make_critic(curiosity_score=4, humility_score=2)
+        assert refiner.is_jointly_compliant(critic) is False
+
+    def test_both_above_threshold(self):
+        """Both scores >= threshold → compliant."""
+        refiner = self._make_refiner(curiosity_threshold=3, humility_threshold=3)
+        critic = self._make_critic(curiosity_score=4, humility_score=4)
+        assert refiner.is_jointly_compliant(critic) is True
+
+    def test_none_scores_with_threshold_fails(self):
+        """None score with threshold > 0 → not compliant."""
+        refiner = self._make_refiner(curiosity_threshold=3)
+        critic = self._make_critic(curiosity_score=None, humility_score=4)
+        assert refiner.is_jointly_compliant(critic) is False
+
+    def test_none_scores_with_zero_threshold_passes(self):
+        """None score with threshold=0 → compliant (check skipped)."""
+        refiner = self._make_refiner(curiosity_threshold=0)
+        critic = self._make_critic(curiosity_score=None, humility_score=None)
+        assert refiner.is_jointly_compliant(critic) is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

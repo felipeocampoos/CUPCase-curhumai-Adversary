@@ -32,6 +32,7 @@ from refinement import (
     compute_compliance_rate,
     compute_clinical_quality_stats,
     compute_hard_fail_rate,
+    compute_curiosity_humility_stats,
     create_refiner_variant,
     list_refiner_variants,
 )
@@ -123,6 +124,18 @@ def parse_args():
         type=float,
         default=0.5,
         help="Confidence shift threshold used for revision-penalty telemetry",
+    )
+    parser.add_argument(
+        "--curiosity-threshold",
+        type=int,
+        default=0,
+        help="Minimum curiosity score (0-5) to pass compliance gate; 0 disables",
+    )
+    parser.add_argument(
+        "--humility-threshold",
+        type=int,
+        default=0,
+        help="Minimum humility score (0-5) to pass compliance gate; 0 disables",
     )
     parser.add_argument(
         "--n-batches",
@@ -313,6 +326,7 @@ def create_summary_report(
                 "n_compliant": len(iterations_to_compliance),
                 "n_non_compliant": len(traces) - len(iterations_to_compliance),
             },
+            "curiosity_humility": compute_curiosity_humility_stats(traces),
         },
         "runtime_seconds": runtime_seconds,
     }
@@ -358,6 +372,8 @@ def main():
         disclosure_fraction=args.disclosure_fraction,
         early_confidence_threshold=args.early_confidence_threshold,
         revision_instability_threshold=args.revision_instability_threshold,
+        curiosity_threshold=args.curiosity_threshold,
+        humility_threshold=args.humility_threshold,
         provider=provider,
     )
     
@@ -475,6 +491,9 @@ def main():
     print(f"Hard fail rate:       {report['metrics']['hard_fail_rate']:.2%}")
     if report['metrics']['iterations']['mean_to_compliance']:
         print(f"Mean iterations:      {report['metrics']['iterations']['mean_to_compliance']:.2f}")
+    ch = report['metrics']['curiosity_humility']
+    print(f"Mean curiosity:       {ch['mean_curiosity_score']:.2f}")
+    print(f"Mean humility:        {ch['mean_humility_score']:.2f}")
     print(f"Runtime:              {runtime:.1f} seconds")
     print("=" * 70)
 

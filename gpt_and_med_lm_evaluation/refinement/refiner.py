@@ -200,8 +200,10 @@ class RefinerConfig:
     early_confidence_threshold: float = 0.8
     revision_instability_threshold: float = 0.5
     checklist_config_path: Optional[Path] = None
+    curiosity_threshold: int = 0
+    humility_threshold: int = 0
     provider: JudgeProvider = JudgeProvider.OPENAI
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "generator_model": self.generator_model,
@@ -217,6 +219,8 @@ class RefinerConfig:
             "disclosure_fraction": self.disclosure_fraction,
             "early_confidence_threshold": self.early_confidence_threshold,
             "revision_instability_threshold": self.revision_instability_threshold,
+            "curiosity_threshold": self.curiosity_threshold,
+            "humility_threshold": self.humility_threshold,
             "provider": self.provider.value,
         }
 
@@ -391,14 +395,27 @@ class IterativeRefiner:
     def is_jointly_compliant(self, critic_result: CriticResult) -> bool:
         """
         Check if response meets joint compliance criteria.
-        
+
         Args:
             critic_result: CriticResult from the Critic
-            
+
         Returns:
             True if all criteria met
         """
-        return critic_result.is_compliant(self.config.clinical_quality_threshold)
+        if not critic_result.is_compliant(self.config.clinical_quality_threshold):
+            return False
+
+        if self.config.curiosity_threshold > 0:
+            score = critic_result.curiosity_score
+            if score is None or score < self.config.curiosity_threshold:
+                return False
+
+        if self.config.humility_threshold > 0:
+            score = critic_result.humility_score
+            if score is None or score < self.config.humility_threshold:
+                return False
+
+        return True
 
     def _get_case_variant_metadata(self) -> Dict[str, Any]:
         """
