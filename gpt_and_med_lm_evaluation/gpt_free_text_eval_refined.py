@@ -45,6 +45,7 @@ from refinement.io import (
     load_refinement_traces,
     save_summary_report,
 )
+from refinement.run_manifest import create_run_manifest, save_run_manifest
 from refinement.schema import ChecklistConfig
 from eval_batching import build_eval_batches
 
@@ -475,6 +476,45 @@ def main():
     report_path = output_dir / f"summary_report_{timestamp}.json"
     save_summary_report(report, report_path)
     logger.info(f"Saved summary report to {report_path}")
+
+    manifest_path = output_dir / f"run_manifest_{timestamp}.json"
+    manifest = create_run_manifest(
+        script_path=__file__,
+        output_paths={
+            "csv": csv_path,
+            "summary_report": report_path,
+            "traces_jsonl": jsonl_path,
+            "run_manifest": manifest_path,
+        },
+        config={
+            "max_iterations": args.max_iterations,
+            "clinical_threshold": args.clinical_threshold,
+            "similarity_threshold": args.similarity_threshold,
+            "disclosure_fraction": args.disclosure_fraction,
+            "early_confidence_threshold": args.early_confidence_threshold,
+            "revision_instability_threshold": args.revision_instability_threshold,
+            "curiosity_threshold": args.curiosity_threshold,
+            "humility_threshold": args.humility_threshold,
+            "n_batches": args.n_batches,
+            "batch_size": args.batch_size,
+            "random_seed": args.random_seed,
+            "sampling_mode": args.sampling_mode,
+            "resume_from": args.resume_from,
+        },
+        dataset={
+            "dataset_preset": args.dataset,
+            "input_path": input_path,
+            "n_rows_loaded": len(ds),
+            "n_cases_processed": len(all_traces),
+        },
+        task="free_text",
+        provider=args.provider,
+        model=args.model,
+        variant=args.variant,
+        runtime_seconds=runtime,
+    )
+    save_run_manifest(manifest, manifest_path)
+    logger.info("Saved run manifest to %s", manifest_path)
     
     # Print summary
     print("\n" + "=" * 70)

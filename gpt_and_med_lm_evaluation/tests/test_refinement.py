@@ -555,21 +555,33 @@ class TestCuriosityHumilityScores:
             case_id="test",
             case_text="test case",
             true_diagnosis="test dx",
+            variant_initial_response=DiagnosticResponse(final_diagnosis="draft dx", next_steps=[]),
+            variant_initial_diagnosis="draft dx",
             final_response=DiagnosticResponse(final_diagnosis="dx", next_steps=[]),
             extracted_final_diagnosis="dx",
             iterations_to_compliance=1,
             is_compliant=True,
             iterations=[],
+            hard_fail_any_iteration=True,
+            first_failure_iteration=1,
+            editor_recovered_case=True,
             curiosity_score=3,
             humility_score=4,
+            variant_stage_metadata={"final_selection_source": "variant_stage"},
+            diagnosis_trajectory=["draft dx", "dx"],
         )
         d = trace.to_dict()
         assert d["curiosity_score"] == 3
         assert d["humility_score"] == 4
+        assert d["variant_initial_diagnosis"] == "draft dx"
+        assert d["editor_recovered_case"] is True
 
         restored = RefinementTrace.from_dict(d)
         assert restored.curiosity_score == 3
         assert restored.humility_score == 4
+        assert restored.variant_initial_diagnosis == "draft dx"
+        assert restored.editor_recovered_case is True
+        assert restored.diagnosis_trajectory == ["draft dx", "dx"]
 
     def test_refinement_trace_backward_compat(self):
         """Old traces without curiosity/humility scores deserialize correctly."""
@@ -587,6 +599,8 @@ class TestCuriosityHumilityScores:
         trace = RefinementTrace.from_dict(data)
         assert trace.curiosity_score is None
         assert trace.humility_score is None
+        assert trace.variant_initial_diagnosis is None
+        assert trace.variant_stage_metadata == {}
 
 
 class TestCuriosityHumilityGating:

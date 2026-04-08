@@ -8,6 +8,7 @@ import logging
 import random
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
@@ -15,6 +16,7 @@ import pandas as pd
 
 from eval_batching import build_eval_batches
 from refinement.refiner import JudgeProvider, create_client
+from refinement.run_manifest import create_run_manifest, save_run_manifest
 from refinement.schema import extract_json_from_response
 from refinement.discriminative_questioning import (
     format_evidence_for_prompt,
@@ -753,6 +755,7 @@ def process_batch(
 
 def main() -> None:
     args = parse_args()
+    start_time = time.time()
 
     if args.dataset == "easy" and args.input == "ablation_study_tokens.csv":
         input_path = "datasets/DiagnosisMedQA_eval_20.csv"
@@ -828,8 +831,46 @@ def main() -> None:
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     results_df.to_csv(args.output, index=False)
 
+    runtime = time.time() - start_time
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    manifest_path = Path(args.output).with_name(f"run_manifest_{timestamp}.json")
+    manifest = create_run_manifest(
+        script_path=__file__,
+        output_paths={
+            "results_csv": args.output,
+            "run_manifest": manifest_path,
+        },
+        config={
+            "n_batches": args.n_batches,
+            "batch_size": args.batch_size,
+            "random_seed": args.random_seed,
+            "sampling_mode": args.sampling_mode,
+            "similarity_threshold": args.similarity_threshold,
+            "disclosure_fraction": args.disclosure_fraction,
+            "early_confidence_threshold": args.early_confidence_threshold,
+            "revision_instability_threshold": args.revision_instability_threshold,
+            "retry_attempts": args.retry_attempts,
+            "retry_delay": args.retry_delay,
+            "api_delay": args.api_delay,
+        },
+        dataset={
+            "dataset_preset": args.dataset,
+            "input_path": input_path,
+            "n_rows_loaded": len(ds),
+            "n_rows_evaluated": len(results_df),
+        },
+        task="mcq",
+        provider=args.provider,
+        model=args.model,
+        variant=args.variant,
+        runtime_seconds=runtime,
+    )
+    save_run_manifest(manifest, manifest_path)
+    logger.info("Saved run manifest to %s", manifest_path)
+
     accuracy = float(results_df["Correct"].mean()) if len(results_df) else 0.0
     print(f"Saved: {args.output}")
+    print(f"Run manifest: {manifest_path}")
     print(f"Variant: {args.variant}")
     print(f"Rows: {len(results_df)}")
     print(f"Accuracy: {accuracy:.4f}")

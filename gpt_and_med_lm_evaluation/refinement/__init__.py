@@ -9,17 +9,35 @@ This module provides components for:
 5. Computing metrics: CCR_all, CCR_Q, CCR_H, iterations to compliance, minimality of edits
 """
 
-from .refiner import IterativeRefiner, JudgeProvider, create_client, create_refiner
-from .variant_factory import create_refiner_variant, list_refiner_variants
-from .variants import (
-    DiscriminativeQuestionRefiner,
-    DifferentialAuditRefiner,
-    DomainRoutedRefiner,
-    HeuristicDomainRouter,
-    ProgressiveDisclosureRefiner,
-    RouteDecision,
-    SemanticSimilarityGatedRefiner,
-)
+try:
+    from .refiner import IterativeRefiner, JudgeProvider, create_client, create_refiner
+    from .variant_factory import create_refiner_variant, list_refiner_variants
+    from .variants import (
+        DiscriminativeQuestionRefiner,
+        DifferentialAuditRefiner,
+        DomainRoutedRefiner,
+        HeuristicDomainRouter,
+        ProgressiveDisclosureRefiner,
+        RouteDecision,
+        SemanticSimilarityGatedRefiner,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "openai":
+        raise
+
+    IterativeRefiner = None
+    JudgeProvider = None
+    create_client = None
+    create_refiner = None
+    create_refiner_variant = None
+    list_refiner_variants = None
+    DiscriminativeQuestionRefiner = None
+    DifferentialAuditRefiner = None
+    DomainRoutedRefiner = None
+    HeuristicDomainRouter = None
+    ProgressiveDisclosureRefiner = None
+    RouteDecision = None
+    SemanticSimilarityGatedRefiner = None
 from .schema import (
     DiagnosticResponse,
     ChecklistItem,
@@ -40,6 +58,12 @@ from .metrics import (
 )
 from .stats import paired_bootstrap_ci, paired_permutation_test
 from .io import JSONLLogger, load_refinement_traces
+from .run_manifest import (
+    compare_run_manifests,
+    create_run_manifest,
+    load_run_manifest,
+    save_run_manifest,
+)
 from .similarity_gating import (
     Candidate,
     CandidateSet,
@@ -110,6 +134,10 @@ __all__ = [
     "paired_permutation_test",
     "JSONLLogger",
     "load_refinement_traces",
+    "create_run_manifest",
+    "save_run_manifest",
+    "load_run_manifest",
+    "compare_run_manifests",
     "DomainRoutedRefiner",
     "DiscriminativeQuestionRefiner",
     "DifferentialAuditRefiner",

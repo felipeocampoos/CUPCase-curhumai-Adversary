@@ -31,6 +31,7 @@ from refinement import (
 )
 from refinement.stats import compare_metrics_paired, format_comparison_report
 from refinement.io import hash_case_text, save_summary_report, load_summary_report
+from refinement.run_manifest import compare_run_manifests, load_run_manifest
 from refinement.schema import ChecklistConfig
 
 # Configure logging
@@ -70,6 +71,23 @@ def parse_args():
         type=str,
         default="output/comparison_report.json",
         help="Path to output comparison report",
+    )
+    parser.add_argument(
+        "--baseline-manifest",
+        type=str,
+        default=None,
+        help="Optional baseline run manifest JSON for comparability checks",
+    )
+    parser.add_argument(
+        "--refined-manifest",
+        type=str,
+        default=None,
+        help="Optional refined run manifest JSON for comparability checks",
+    )
+    parser.add_argument(
+        "--allow-mismatch",
+        action="store_true",
+        help="Allow comparison to continue even when run manifests disagree",
     )
     parser.add_argument(
         "--n-bootstrap",
@@ -137,21 +155,47 @@ def align_results(
     """
     # Use case hash if available, otherwise use index
     if "case_hash" in baseline_df.columns and "case_hash" in refined_df.columns:
-        # Find common cases
-        common_hashes = set(baseline_df["case_hash"]) & set(refined_df["case_hash"])
-        logger.info(f"Found {len(common_hashes)} common cases by hash")
-        
-        baseline_aligned = baseline_df[baseline_df["case_hash"].isin(common_hashes)]
-        refined_aligned = refined_df[refined_df["case_hash"].isin(common_hashes)]
-        
-        # Sort by hash for alignment
-        baseline_aligned = baseline_aligned.sort_values("case_hash").reset_index(drop=True)
-        refined_aligned = refined_aligned.sort_values("case_hash").reset_index(drop=True)
+        baseline_counts = baseline_df["case_hash"].value_counts().sort_index()
+        refined_counts = refined_df["case_hash"].value_counts().sort_index()
+        unique_overlap = len(set(baseline_counts.index) & set(refined_counts.index))
+        logger.info(f"Found {unique_overlap} common case hashes")
+        if unique_overlap == 0:
+            raise ValueError("No overlapping case hashes found between baseline and refined results")
+
+        if not baseline_counts.equals(refined_counts):
+            raise ValueError(
+                "Baseline and refined outputs do not contain the same case multiset; rerun with identical inputs or pass --allow-mismatch only after validating manifests separately"
+            )
+
+        # Preserve duplicate bootstrap draws by aligning each repeated hash occurrence.
+        baseline_aligned = baseline_df.copy()
+        refined_aligned = refined_df.copy()
+        baseline_aligned["_case_occurrence"] = baseline_aligned.groupby("case_hash").cumcount()
+        refined_aligned["_case_occurrence"] = refined_aligned.groupby("case_hash").cumcount()
+
+        baseline_aligned = baseline_aligned.sort_values(
+            ["case_hash", "_case_occurrence"], kind="stable"
+        ).reset_index(drop=True)
+        refined_aligned = refined_aligned.sort_values(
+            ["case_hash", "_case_occurrence"], kind="stable"
+        ).reset_index(drop=True)
+
+        baseline_keys = list(zip(baseline_aligned["case_hash"], baseline_aligned["_case_occurrence"]))
+        refined_keys = list(zip(refined_aligned["case_hash"], refined_aligned["_case_occurrence"]))
+        if baseline_keys != refined_keys:
+            raise ValueError("Aligned baseline and refined case hashes do not match in order")
+
+        baseline_aligned = baseline_aligned.drop(columns="_case_occurrence")
+        refined_aligned = refined_aligned.drop(columns="_case_occurrence")
         
     else:
         # Fallback: align by index (assuming same order)
         min_len = min(len(baseline_df), len(refined_df))
         logger.warning(f"No case hash available, aligning by index ({min_len} cases)")
+        if len(baseline_df) != len(refined_df):
+            raise ValueError(
+                "Cannot safely align by index when baseline and refined row counts differ and no case_hash is available"
+            )
         
         baseline_aligned = baseline_df.head(min_len).reset_index(drop=True)
         refined_aligned = refined_df.head(min_len).reset_index(drop=True)
@@ -270,6 +314,7 @@ def create_comparison_report(
     n_baseline: int,
     n_refined: int,
     n_aligned: int,
+    manifest_comparison: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Create full comparison report."""
     report = {
@@ -282,6 +327,7 @@ def create_comparison_report(
             "n_aligned": n_aligned,
         },
         "comparisons": comparison_results,
+        "manifest_comparison": manifest_comparison,
         "summary": {},
     }
     
@@ -316,6 +362,15 @@ def format_text_report(report: Dict[str, Any]) -> str:
     lines.append(f"Refined:  {report['inputs']['refined_path']}")
     lines.append(f"Aligned cases: {report['inputs']['n_aligned']}")
     lines.append("")
+    manifest_comparison = report.get("manifest_comparison")
+    if manifest_comparison is not None:
+        status = "comparable" if manifest_comparison.get("is_comparable") else "NOT comparable"
+        lines.append(f"Manifest check: {status}")
+        for mismatch in manifest_comparison.get("mismatches", []):
+            lines.append(
+                f"  mismatch {mismatch['label']}: baseline={mismatch['baseline']} refined={mismatch['refined']}"
+            )
+        lines.append("")
     lines.append("-" * 70)
     lines.append("METRIC COMPARISONS")
     lines.append("-" * 70)
@@ -377,6 +432,20 @@ def main():
     # Load results
     baseline_df = load_baseline_results(args.baseline)
     refined_df = load_refined_results(args.refined)
+
+    manifest_comparison = None
+    if args.baseline_manifest and args.refined_manifest:
+        baseline_manifest = load_run_manifest(args.baseline_manifest)
+        refined_manifest = load_run_manifest(args.refined_manifest)
+        manifest_comparison = compare_run_manifests(baseline_manifest, refined_manifest)
+        if not manifest_comparison["is_comparable"]:
+            mismatch_labels = ", ".join(
+                mismatch["label"] for mismatch in manifest_comparison["mismatches"]
+            )
+            message = f"Run manifests are not comparable: {mismatch_labels}"
+            if not args.allow_mismatch:
+                raise ValueError(message)
+            logger.warning(message)
     
     # Align by case
     baseline_aligned, refined_aligned = align_results(baseline_df, refined_df)
@@ -411,6 +480,7 @@ def main():
         n_baseline=len(baseline_df),
         n_refined=len(refined_df),
         n_aligned=len(baseline_aligned),
+        manifest_comparison=manifest_comparison,
     )
     
     # Save JSON report
