@@ -271,14 +271,21 @@ class RefinementTrace:
     iterations_to_compliance: Optional[int]
     is_compliant: bool
     iterations: List[IterationLog]
+    variant_initial_response: Optional[DiagnosticResponse] = None
+    variant_initial_diagnosis: Optional[str] = None
     minimality_metrics: Dict[str, float] = field(default_factory=dict)
     checklist_pass_map: Dict[str, bool] = field(default_factory=dict)
     clinical_quality_score: Optional[int] = None
     hard_fail: bool = False
+    hard_fail_any_iteration: bool = False
+    first_failure_iteration: Optional[int] = None
+    editor_recovered_case: bool = False
     curiosity_score: Optional[int] = None
     humility_score: Optional[int] = None
     variant_name: str = "baseline"
     variant_metadata: Dict[str, Any] = field(default_factory=dict)
+    variant_stage_metadata: Dict[str, Any] = field(default_factory=dict)
+    diagnosis_trajectory: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -286,6 +293,12 @@ class RefinementTrace:
             "case_id": self.case_id,
             "case_text": self.case_text,
             "true_diagnosis": self.true_diagnosis,
+            "variant_initial_response": (
+                self.variant_initial_response.to_dict()
+                if self.variant_initial_response
+                else None
+            ),
+            "variant_initial_diagnosis": self.variant_initial_diagnosis,
             "final_response": self.final_response.to_dict(),
             "extracted_final_diagnosis": self.extracted_final_diagnosis,
             "iterations_to_compliance": self.iterations_to_compliance,
@@ -295,10 +308,15 @@ class RefinementTrace:
             "checklist_pass_map": self.checklist_pass_map,
             "clinical_quality_score": self.clinical_quality_score,
             "hard_fail": self.hard_fail,
+            "hard_fail_any_iteration": self.hard_fail_any_iteration,
+            "first_failure_iteration": self.first_failure_iteration,
+            "editor_recovered_case": self.editor_recovered_case,
             "curiosity_score": self.curiosity_score,
             "humility_score": self.humility_score,
             "variant_name": self.variant_name,
             "variant_metadata": self.variant_metadata,
+            "variant_stage_metadata": self.variant_stage_metadata,
+            "diagnosis_trajectory": self.diagnosis_trajectory,
         }
     
     @classmethod
@@ -319,6 +337,12 @@ class RefinementTrace:
             case_id=data.get("case_id", ""),
             case_text=data.get("case_text", ""),
             true_diagnosis=data.get("true_diagnosis", ""),
+            variant_initial_response=(
+                DiagnosticResponse.from_dict(data["variant_initial_response"])
+                if data.get("variant_initial_response")
+                else None
+            ),
+            variant_initial_diagnosis=data.get("variant_initial_diagnosis"),
             final_response=DiagnosticResponse.from_dict(data.get("final_response", {})),
             extracted_final_diagnosis=data.get("extracted_final_diagnosis", ""),
             iterations_to_compliance=data.get("iterations_to_compliance"),
@@ -328,10 +352,18 @@ class RefinementTrace:
             checklist_pass_map=data.get("checklist_pass_map", {}),
             clinical_quality_score=data.get("clinical_quality_score"),
             hard_fail=data.get("hard_fail", False),
+            hard_fail_any_iteration=data.get("hard_fail_any_iteration", False),
+            first_failure_iteration=data.get("first_failure_iteration"),
+            editor_recovered_case=data.get("editor_recovered_case", False),
             curiosity_score=data.get("curiosity_score"),
             humility_score=data.get("humility_score"),
             variant_name=data.get("variant_name", "baseline"),
             variant_metadata=data.get("variant_metadata", {}),
+            variant_stage_metadata=data.get(
+                "variant_stage_metadata",
+                data.get("variant_metadata", {}),
+            ),
+            diagnosis_trajectory=data.get("diagnosis_trajectory", []),
         )
 
 

@@ -6,6 +6,7 @@ Main refiner class implementing the Generator -> Critic -> Editor loop.
 
 import time
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Callable
 from dataclasses import dataclass
@@ -459,12 +460,16 @@ class IterativeRefiner:
             return self._create_error_trace(
                 case_id, case_text, true_diagnosis, str(e)
             )
-        
+
+        variant_initial_response = deepcopy(draft)
+        variant_stage_metadata = dict(self._get_case_variant_metadata())
         responses.append(draft)
         
         # Step 2: Iterate
         iterations_to_compliance: Optional[int] = None
         is_compliant = False
+        hard_fail_any_iteration = False
+        first_failure_iteration: Optional[int] = None
         
         for iteration in range(1, self.config.max_iterations + 1):
             # Critique current draft
@@ -481,6 +486,9 @@ class IterativeRefiner:
                 response=draft,
                 critic_result=critic_result,
             ))
+
+            if critic_result.hard_fail.failed:
+                hard_fail_any_iteration = True
             
             # Track best response
             quality = critic_result.clinical_quality.score
@@ -495,7 +503,11 @@ class IterativeRefiner:
                 best_critic = critic_result
             
             # Check joint compliance
-            if self.is_jointly_compliant(critic_result):
+            is_jointly_compliant = self.is_jointly_compliant(critic_result)
+            if not is_jointly_compliant and first_failure_iteration is None:
+                first_failure_iteration = iteration
+
+            if is_jointly_compliant:
                 iterations_to_compliance = iteration
                 is_compliant = True
                 break
@@ -540,10 +552,20 @@ class IterativeRefiner:
             humility_score = final_critic.humility_score
         
         # Build trace
+        diagnosis_trajectory = [response.final_diagnosis for response in responses]
+        editor_recovered_case = bool(
+            is_compliant
+            and first_failure_iteration is not None
+            and iterations_to_compliance is not None
+            and iterations_to_compliance > first_failure_iteration
+        )
+
         trace = RefinementTrace(
             case_id=case_id,
             case_text=case_text,
             true_diagnosis=true_diagnosis,
+            variant_initial_response=variant_initial_response,
+            variant_initial_diagnosis=variant_initial_response.final_diagnosis,
             final_response=draft,
             extracted_final_diagnosis=draft.final_diagnosis,
             iterations_to_compliance=iterations_to_compliance,
@@ -553,10 +575,15 @@ class IterativeRefiner:
             checklist_pass_map=checklist_pass_map,
             clinical_quality_score=clinical_quality_score,
             hard_fail=hard_fail,
+            hard_fail_any_iteration=hard_fail_any_iteration,
+            first_failure_iteration=first_failure_iteration,
+            editor_recovered_case=editor_recovered_case,
             curiosity_score=curiosity_score,
             humility_score=humility_score,
             variant_name=self.variant_name,
-            variant_metadata=self._get_case_variant_metadata(),
+            variant_metadata=dict(self._get_case_variant_metadata()),
+            variant_stage_metadata=variant_stage_metadata,
+            diagnosis_trajectory=diagnosis_trajectory,
         )
         
         return trace
@@ -578,6 +605,8 @@ class IterativeRefiner:
             case_id=case_id,
             case_text=case_text,
             true_diagnosis=true_diagnosis,
+            variant_initial_response=error_response,
+            variant_initial_diagnosis=error_response.final_diagnosis,
             final_response=error_response,
             extracted_final_diagnosis=error_response.final_diagnosis,
             iterations_to_compliance=None,
@@ -587,8 +616,13 @@ class IterativeRefiner:
             checklist_pass_map={},
             clinical_quality_score=None,
             hard_fail=True,
+            hard_fail_any_iteration=True,
+            first_failure_iteration=1,
+            editor_recovered_case=False,
             variant_name=self.variant_name,
-            variant_metadata=self._get_case_variant_metadata(),
+            variant_metadata=dict(self._get_case_variant_metadata()),
+            variant_stage_metadata=dict(self._get_case_variant_metadata()),
+            diagnosis_trajectory=[error_response.final_diagnosis],
         )
     
     def _create_format_failure_critic(self) -> CriticResult:
