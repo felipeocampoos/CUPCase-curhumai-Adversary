@@ -2,6 +2,10 @@
 
 This repository contains CUPCase evaluation and preprocessing code. This runbook is the canonical way to run the paper-core experiment matrix end-to-end and compare methods later.
 
+Focused MedConceptsQA commands are collected in:
+
+`MEDCONCEPTSQA_QUICKSTART.md`
+
 ### What this runbook covers
 
 - API-based MCQ and free-text evaluation in `gpt_and_med_lm_evaluation/`
@@ -13,7 +17,8 @@ This repository contains CUPCase evaluation and preprocessing code. This runbook
 ### What this runbook does **not** cover
 
 - Full preprocessing/regeneration pipeline in `preprocess/` and `utils/`
-- On-prem model benchmarking in `lm_eval_evaluation/`
+- General on-prem model benchmarking in `lm_eval_evaluation/`, except for the
+  repo-owned `MedConceptsQA` runner and smoke path documented below.
 
 Those workflows are intentionally out of this orchestration to keep the paper-core comparison matrix reproducible.
 
@@ -67,6 +72,32 @@ python openai_compatible_smoke.py --task mcq
 python openai_compatible_smoke.py --task free_text --variant baseline
 python huggingface_local_smoke.py --task mcq
 python huggingface_local_smoke.py --task free_text --variant baseline
+```
+
+HF local comparison bundle:
+
+```bash
+python hf_local_analysis.py \
+  --baseline-variant baseline \
+  --refined-variant domain_routed \
+  --input datasets/CUPCASE_RTEST_eval_20.csv \
+  --output-dir output/hf_local_analysis
+```
+
+This writes one analysis bundle containing:
+- baseline/refined run directories,
+- `run_manifest_*.json` provenance for each run,
+- `compare/comparison_report.json` and `.txt`,
+- `analysis_summary.md` with what changed, what stayed constant, and what evidence is still missing.
+
+Additional MedConceptsQA smoke checks:
+
+```bash
+cd lm_eval_evaluation
+python scripts/medconceptsqa_smoke.py --keep-output
+
+cd ../gpt_and_med_lm_evaluation
+python medconceptsqa_smoke.py --keep-output
 ```
 
 ---
@@ -133,6 +164,88 @@ python prepare_hf_diagnosismedqa.py \
   --sample-size 100 \
   --seed 42
 ```
+
+### 3.3 MedConceptsQA
+
+Upstream: `ofir408/MedConceptsQA`
+
+Supported `--subset` values:
+
+- `all`: the full benchmark group
+- vocab-only: `icd9cm`, `icd10cm`, `icd9proc`, `icd10proc`, `atc`
+- vocab + difficulty: `<vocab>_easy`, `<vocab>_medium`, `<vocab>_hard`
+
+Examples:
+
+- `icd10cm_easy`: easy ICD-10-CM questions only
+- `atc_hard`: hard ATC drug-code questions only
+- `icd9proc_medium`: medium ICD-9 procedure questions only
+
+Sample-count control:
+
+- `lm_eval` runner: `--sample-size` is forwarded to the harness as a fixed-document limit for testing/debugging.
+- CUPCase MCQ runner: `--sample-size` controls how many HF rows are materialized into the generated evaluator CSV.
+
+Repo-owned `lm_eval` runner:
+
+```bash
+cd lm_eval_evaluation
+python scripts/run_medconceptsqa.py \
+  --model hf \
+  --model-args pretrained=BioMistral/BioMistral-7B-DARE \
+  --subset all \
+  --sample-size 100 \
+  --device cuda:0 \
+  --log-samples
+```
+
+Difficulty-specific `lm_eval` example:
+
+```bash
+python scripts/run_medconceptsqa.py \
+  --model hf \
+  --model-args pretrained=BioMistral/BioMistral-7B-DARE \
+  --subset atc_hard \
+  --sample-size 50 \
+  --device cuda:0 \
+  --batch-size auto \
+  --log-samples
+```
+
+Repo-owned CUPCase MCQ runner:
+
+```bash
+cd ../gpt_and_med_lm_evaluation
+python run_medconceptsqa_mcq.py \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --subset icd10cm_easy \
+  --sample-size 25 \
+  --variant baseline
+```
+
+Difficulty-specific CUPCase MCQ example:
+
+```bash
+python run_medconceptsqa_mcq.py \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --subset icd9proc_medium \
+  --sample-size 10 \
+  --variant baseline
+```
+
+Generated evaluator-compatible CSVs are written under:
+
+`gpt_and_med_lm_evaluation/datasets/generated/medconceptsqa/`
+
+`lm_eval` outputs are written under:
+
+`lm_eval_evaluation/output/medconceptsqa/<subset>/<model_slug>/<timestamp>/`
+
+CUPCase MCQ outputs are written under:
+
+`gpt_and_med_lm_evaluation/output/experiments/medconceptsqa/<subset>/<provider>/mcq/<variant>/<model_slug>/<sample_label>/`
 
 Run the domain-routed free-text refinement on the HF-prepared CSV:
 
@@ -213,6 +326,7 @@ Examples:
 - `.../partial/openai/free_text/discriminative_question/summary_report_*.json`
 - `.../full/deepseek/free_text/baseline/results.csv`
 - `.../full/openai/comparisons/domain_routed/comparison_report.json`
+- `.../hf_local_analysis/<timestamp>/runs/baseline/run_manifest_*.json`
 
 ---
 

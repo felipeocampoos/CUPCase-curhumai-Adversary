@@ -23,6 +23,10 @@ Notes:
 
 Please ensure that the CUPCase dataset is placed in the /datasets folder within this directory.
 
+For `MedConceptsQA`, use the Hugging Face adapter below instead of checking in a
+CSV manually. Generated evaluator-compatible files are written under
+`datasets/generated/medconceptsqa/`.
+
 ## API keys
 
 To use gpt-4o (or any OpenAI model) for evaluation, please create and place your API_KEY in a .env file.
@@ -61,6 +65,23 @@ Validate that local path before running a benchmark:
 python huggingface_local_smoke.py --task mcq
 python huggingface_local_smoke.py --task free_text --variant baseline
 ```
+
+Smoke test MedConceptsQA through the MCQ evaluator:
+
+```bash
+python medconceptsqa_smoke.py --keep-output
+```
+
+For a structured native Hugging Face comparison bundle that keeps baseline and refined runs directly comparable:
+
+```bash
+python hf_local_analysis.py \
+  --baseline-variant baseline \
+  --refined-variant domain_routed \
+  --input datasets/CUPCASE_RTEST_eval_20.csv
+```
+
+Each refined run now also emits `run_manifest_*.json` next to its CSV/trace/summary artifacts.
 ## Usage
 
 To perform evaluation, run the specific evaluation script you wish to use. For example:
@@ -68,6 +89,73 @@ To perform evaluation, run the specific evaluation script you wish to use. For e
 ```bash
 python gpt_free_text_eval.py
 ```
+
+### MedConceptsQA adapter
+
+Prepare an evaluator-compatible CSV from Hugging Face:
+
+```bash
+python prepare_hf_medconceptsqa.py \
+  --subset icd10cm_easy \
+  --split test \
+  --sample-size 25
+```
+
+Supported `--subset` values:
+
+- `all`
+- vocab-only: `icd9cm`, `icd10cm`, `icd9proc`, `icd10proc`, `atc`
+- vocab + difficulty: `<vocab>_easy`, `<vocab>_medium`, `<vocab>_hard`
+
+Examples:
+
+- `icd10cm_easy`
+- `icd10cm_medium`
+- `icd10cm_hard`
+- `atc_hard`
+
+`--sample-size` controls how many rows are fetched and written into the
+generated CUPCase-compatible CSV.
+
+This writes:
+
+`datasets/generated/medconceptsqa/<subset>_<split>_<sample_label>.csv`
+
+### MedConceptsQA MCQ runner
+
+Run MedConceptsQA through the existing MCQ evaluator with standardized output
+paths:
+
+```bash
+python run_medconceptsqa_mcq.py \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --subset icd10cm_easy \
+  --sample-size 25 \
+  --variant baseline
+```
+
+Difficulty-specific examples:
+
+```bash
+python run_medconceptsqa_mcq.py \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --subset icd10cm_medium \
+  --sample-size 25 \
+  --variant baseline
+
+python run_medconceptsqa_mcq.py \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --subset atc_hard \
+  --sample-size 10 \
+  --variant baseline
+```
+
+Artifacts are written under:
+
+`output/experiments/medconceptsqa/<subset>/<provider>/mcq/<variant>/<model_slug>/<sample_label>/`
 
 ## Scripts
 
