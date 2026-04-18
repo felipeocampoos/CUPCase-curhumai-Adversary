@@ -6,6 +6,10 @@ Focused MedConceptsQA commands are collected in:
 
 `MEDCONCEPTSQA_QUICKSTART.md`
 
+Focused MedCalc-Bench commands are collected in:
+
+`MEDCALC_BENCH_QUICKSTART.md`
+
 ### What this runbook covers
 
 - API-based MCQ and free-text evaluation in `gpt_and_med_lm_evaluation/`
@@ -98,6 +102,16 @@ python scripts/medconceptsqa_smoke.py --keep-output
 
 cd ../gpt_and_med_lm_evaluation
 python medconceptsqa_smoke.py --keep-output
+```
+
+Additional MedCalc-Bench smoke checks:
+
+```bash
+cd lm_eval_evaluation
+python scripts/medcalc_bench_smoke.py --keep-output
+
+cd ../gpt_and_med_lm_evaluation
+python medcalc_bench_smoke.py --keep-output
 ```
 
 ---
@@ -246,6 +260,86 @@ Generated evaluator-compatible CSVs are written under:
 CUPCase MCQ outputs are written under:
 
 `gpt_and_med_lm_evaluation/output/experiments/medconceptsqa/<subset>/<provider>/mcq/<variant>/<model_slug>/<sample_label>/`
+
+### 3.4 MedCalc-Bench-Verified
+
+Upstream: `nsk7153/MedCalc-Bench-Verified`
+
+This benchmark is integrated on both repo-owned experiment surfaces:
+
+- `lm_eval_evaluation/` as a generative task with structured scoring
+- `gpt_and_med_lm_evaluation/` as a free-text evaluator with numeric tolerance scoring
+
+Prepare a normalized local CSV:
+
+```bash
+cd gpt_and_med_lm_evaluation
+python prepare_hf_medcalc_bench.py \
+  --split test \
+  --sample-size 25
+```
+
+Generated CSVs are written under:
+
+`gpt_and_med_lm_evaluation/datasets/generated/medcalc_bench/`
+
+Run the API-based evaluator:
+
+```bash
+python run_medcalc_bench_free_text.py \
+  --provider huggingface_local \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --split test \
+  --sample-size 25
+```
+
+API-based evaluator artifacts are written under:
+
+`gpt_and_med_lm_evaluation/output/experiments/medcalc_bench/<split>/<provider>/free_text/<model_slug>/<sample_label>/`
+
+That directory contains:
+
+- `results.csv` for per-example predictions and scoring
+- `summary_report_<timestamp>.json` for aggregate metrics
+- `run_manifest_<timestamp>.json` for run provenance
+
+Run the `lm_eval` wrapper:
+
+```bash
+cd ../lm_eval_evaluation
+python scripts/run_medcalc_bench.py \
+  --model hf \
+  --model-args pretrained=BioMistral/BioMistral-7B-DARE \
+  --split test \
+  --sample-size 50 \
+  --device cuda:0 \
+  --log-samples
+```
+
+`lm_eval` outputs are written under:
+
+`lm_eval_evaluation/output/medcalc_bench/<split>/<model_slug>/<timestamp>/`
+
+The actual aggregate metrics file is written under the nested harness model directory inside that timestamped folder, for example:
+
+`lm_eval_evaluation/output/medcalc_bench/test/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/sshleifer__tiny-gpt2/results_<timestamp>.json`
+
+That `lm_eval` run also writes:
+
+- `results_<timestamp>.json` for aggregate metrics
+- `samples_med_calc_bench_<timestamp>.jsonl` when `--log-samples` is enabled
+
+Tested smoke commands:
+
+```bash
+cd gpt_and_med_lm_evaluation
+.venv312/bin/python medcalc_bench_smoke.py --keep-output
+
+cd ../lm_eval_evaluation
+../gpt_and_med_lm_evaluation/.venv312/bin/python scripts/medcalc_bench_smoke.py --keep-output
+```
+
+For portability, the `lm_eval` smoke path is configured to use `sshleifer/tiny-gpt2` on `cpu`.
 
 Run the domain-routed free-text refinement on the HF-prepared CSV:
 

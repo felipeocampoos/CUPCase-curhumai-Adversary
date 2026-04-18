@@ -1,0 +1,5 @@
+group: med_calc_bench
+task: med_calc_bench_train
+task_alias: med_calc_bench_train
+include: _default_template_yaml
+test_split: train
