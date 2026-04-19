@@ -1,0 +1,4 @@
+group: med_calc_bench
+task: med_calc_bench
+task_alias: med_calc_bench
+include: _default_template_yaml
