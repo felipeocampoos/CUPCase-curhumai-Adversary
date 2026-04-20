@@ -289,19 +289,32 @@ Run the API-based evaluator:
 python run_medcalc_bench_free_text.py \
   --provider huggingface_local \
   --model Qwen/Qwen2.5-0.5B-Instruct \
+  --method medcalc_semantic_gate \
   --split test \
   --sample-size 25
 ```
 
+Available API-side MedCalc methods:
+
+- `direct`
+- `zero_shot_cot`
+- `one_shot_cot`
+- `medcalc_semantic_gate`
+
 API-based evaluator artifacts are written under:
 
-`gpt_and_med_lm_evaluation/output/experiments/medcalc_bench/<split>/<provider>/free_text/<model_slug>/<sample_label>/`
+`gpt_and_med_lm_evaluation/output/experiments/medcalc_bench/<split>/<provider>/free_text/<method>/<model_slug>/<sample_label>/`
 
 That directory contains:
 
 - `results.csv` for per-example predictions and scoring
 - `summary_report_<timestamp>.json` for aggregate metrics
 - `run_manifest_<timestamp>.json` for run provenance
+
+`one_shot_cot` supports deterministic example selection through:
+
+- `--icl-example-id <id>`
+- `--icl-seed <seed>`
 
 Run the `lm_eval` wrapper:
 
@@ -310,6 +323,7 @@ cd ../lm_eval_evaluation
 python scripts/run_medcalc_bench.py \
   --model hf \
   --model-args pretrained=BioMistral/BioMistral-7B-DARE \
+  --method zero_shot_cot \
   --split test \
   --sample-size 50 \
   --device cuda:0 \
@@ -318,11 +332,15 @@ python scripts/run_medcalc_bench.py \
 
 `lm_eval` outputs are written under:
 
-`lm_eval_evaluation/output/medcalc_bench/<split>/<model_slug>/<timestamp>/`
+`lm_eval_evaluation/output/medcalc_bench/<split>/<method>/<model_slug>/<timestamp>/`
 
-The actual aggregate metrics file is written under the nested harness model directory inside that timestamped folder, for example:
+For `direct`, `zero_shot_cot`, and `one_shot_cot`, the actual aggregate metrics file is written under the nested harness model directory inside that timestamped folder, for example:
 
-`lm_eval_evaluation/output/medcalc_bench/test/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/sshleifer__tiny-gpt2/results_<timestamp>.json`
+`lm_eval_evaluation/output/medcalc_bench/test/direct/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/sshleifer__tiny-gpt2/results_<timestamp>.json`
+
+For `medcalc_semantic_gate`, the wrapper delegates to the repo-owned MedCalc local-model runner, so artifacts are nested under the wrapper run root, for example:
+
+`lm_eval_evaluation/output/medcalc_bench/test/medcalc_semantic_gate/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/test/huggingface_local/free_text/medcalc_semantic_gate/sshleifer_tiny-gpt2/n1_seed42/results.csv`
 
 That `lm_eval` run also writes:
 
@@ -333,10 +351,10 @@ Tested smoke commands:
 
 ```bash
 cd gpt_and_med_lm_evaluation
-.venv312/bin/python medcalc_bench_smoke.py --keep-output
+.venv312/bin/python medcalc_bench_smoke.py --method medcalc_semantic_gate --keep-output
 
 cd ../lm_eval_evaluation
-../gpt_and_med_lm_evaluation/.venv312/bin/python scripts/medcalc_bench_smoke.py --keep-output
+../gpt_and_med_lm_evaluation/.venv312/bin/python scripts/medcalc_bench_smoke.py --method one_shot_cot --keep-output
 ```
 
 For portability, the `lm_eval` smoke path is configured to use `sshleifer/tiny-gpt2` on `cpu`.

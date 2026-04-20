@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
         default="pretrained=sshleifer/tiny-gpt2",
     )
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--method", type=str, default="direct")
     parser.add_argument("--python", type=str, default=sys.executable)
     parser.add_argument("--keep-output", action="store_true")
     return parser.parse_args()
@@ -41,6 +42,8 @@ def main() -> int:
         args.device,
         "--split",
         args.split,
+        "--method",
+        args.method,
         "--sample-size",
         str(args.sample_size),
         "--batch-size",

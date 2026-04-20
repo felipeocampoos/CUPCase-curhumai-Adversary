@@ -7,7 +7,16 @@ if str(MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(MODULE_DIR))
 
 from prepare_hf_medcalc_bench import build_default_output_path, convert_rows, maybe_sample
-from run_medcalc_bench_free_text import extract_answer_numeric, score_prediction
+from run_medcalc_bench_free_text import (
+    build_prompt,
+    build_results_dir,
+    choose_consensus_candidate,
+    extract_answer_segment,
+    extract_answer_numeric,
+    parse_candidate_prediction,
+    score_prediction,
+    select_icl_example,
+)
 
 
 def test_convert_rows_maps_hf_fields_to_normalized_schema():
@@ -55,6 +64,13 @@ def test_maybe_sample_is_deterministic():
 def test_build_default_output_path_includes_split_and_sampling():
     path = build_default_output_path("test", 5, 9)
     assert path == Path("datasets/generated/medcalc_bench/test_n5_seed9.csv")
+
+
+def test_build_results_dir_includes_method():
+    path = build_results_dir("output/experiments/medcalc_bench", "test", "huggingface_local", "zero_shot_cot", "model/name", 5, 9)
+    assert path == Path(
+        "output/experiments/medcalc_bench/test/huggingface_local/free_text/zero_shot_cot/model_name/n5_seed9"
+    )
 
 
 def test_score_prediction_uses_numeric_interval():
@@ -107,3 +123,65 @@ def test_extract_answer_numeric_prefers_final_answer_segment():
     parsed = extract_answer_numeric("Range 70 to 80. Final answer: 75 mL/min/1.73 m²")
     assert parsed is not None
     assert str(parsed) == "75"
+
+
+def test_extract_answer_segment_handles_chat_style_answer():
+    assert (
+        extract_answer_segment("The answer is Glanzmann's thrombasthenia")
+        == "Glanzmann's thrombasthenia"
+    )
+
+
+def test_select_icl_example_is_deterministic():
+    examples = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    assert select_icl_example(examples, example_id=None, seed=11) == select_icl_example(
+        examples,
+        example_id=None,
+        seed=11,
+    )
+
+
+def test_select_icl_example_excludes_current_row():
+    examples = [{"id": "a"}, {"id": "b"}]
+    selected = select_icl_example(
+        examples,
+        example_id=None,
+        seed=0,
+        exclude_ids=["a"],
+    )
+    assert selected == {"id": "b"}
+
+
+def test_build_prompt_one_shot_includes_worked_example():
+    example = {
+        "id": "demo-1",
+        "case_text": "Example note",
+        "question": "Example question",
+        "relevant_entities": "",
+        "ground_truth_explanation": "Example reasoning",
+        "ground_truth_answer": "42",
+    }
+    prompt = build_prompt(
+        method="one_shot_cot",
+        case_text="Real note",
+        question="Real question",
+        output_type="decimal",
+        relevant_entities="",
+        max_case_words=250,
+        icl_example=example,
+    )
+
+    assert "Worked example:" in prompt
+    assert "Final answer: 42" in prompt
+    assert "Now solve the real case." in prompt
+
+
+def test_choose_consensus_candidate_returns_majority_numeric_answer():
+    candidates = [
+        parse_candidate_prediction("Final answer: 75 mL/min/1.73 m²", "decimal"),
+        parse_candidate_prediction("75", "decimal"),
+        parse_candidate_prediction("Final answer: 80", "decimal"),
+    ]
+    consensus = choose_consensus_candidate(candidates)
+    assert consensus is not None
+    assert consensus.normalized_prediction == "75"

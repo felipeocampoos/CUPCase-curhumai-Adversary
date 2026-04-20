@@ -1,0 +1,5 @@
+group: med_calc_bench
+task: med_calc_bench_zero_shot_cot_train
+task_alias: med_calc_bench_zero_shot_cot_train
+include: med_calc_bench_zero_shot_cot.yaml
+test_split: train

@@ -17,6 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-size", type=int, default=1)
     parser.add_argument("--provider", type=str, default="huggingface_local")
     parser.add_argument("--model", type=str, default="sshleifer/tiny-gpt2")
+    parser.add_argument("--method", type=str, default="direct")
     parser.add_argument("--python", type=str, default=sys.executable)
     parser.add_argument("--keep-output", action="store_true")
     return parser.parse_args()
@@ -37,6 +38,8 @@ def main() -> int:
         args.provider,
         "--model",
         args.model,
+        "--method",
+        args.method,
         "--output-root",
         str(output_root),
         "--retry-attempts",
