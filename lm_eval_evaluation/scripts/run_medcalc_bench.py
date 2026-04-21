@@ -17,6 +17,7 @@ VALID_METHODS = {
     "zero_shot_cot",
     "one_shot_cot",
     "medcalc_semantic_gate",
+    "medcalc_uncertainty_consistency_gate",
 }
 
 
@@ -76,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--icl-seed", type=int, default=42)
     parser.add_argument("--num-candidates", type=int, default=3)
     parser.add_argument("--candidate-temperature", type=float, default=0.7)
+    parser.add_argument("--verifier-risk-threshold", type=float, default=0.5)
     return parser.parse_args()
 
 
@@ -127,11 +129,16 @@ def run_lm_eval(args: argparse.Namespace, split: str, method: str, run_root: Pat
     return completed.returncode
 
 
-def run_medcalc_semantic_gate(args: argparse.Namespace, split: str, run_root: Path) -> int:
+def run_medcalc_gated_method(
+    args: argparse.Namespace,
+    split: str,
+    run_root: Path,
+    method: str,
+) -> int:
     pretrained = parse_model_arg(args.model_args, "pretrained")
     if args.model != "hf" or not pretrained:
         raise ValueError(
-            "medcalc_semantic_gate on the local-model surface currently requires "
+            f"{method} on the local-model surface currently requires "
             "`--model hf --model-args pretrained=<hf-model>`"
         )
 
@@ -146,7 +153,7 @@ def run_medcalc_semantic_gate(args: argparse.Namespace, split: str, run_root: Pa
         "--model",
         pretrained,
         "--method",
-        "medcalc_semantic_gate",
+        method,
         "--output-root",
         str(run_root),
         "--seed",
@@ -157,6 +164,8 @@ def run_medcalc_semantic_gate(args: argparse.Namespace, split: str, run_root: Pa
         str(args.num_candidates),
         "--candidate-temperature",
         str(args.candidate_temperature),
+        "--verifier-risk-threshold",
+        str(args.verifier_risk_threshold),
         "--retry-attempts",
         "1",
         "--retry-delay",
@@ -179,9 +188,9 @@ def run_medcalc_semantic_gate(args: argparse.Namespace, split: str, run_root: Pa
         env=env,
     )
     if completed.returncode == 0:
-        print("Task:       medcalc_semantic_gate")
+        print(f"Task:       {method}")
         print(f"Split:      {split}")
-        print("Method:     medcalc_semantic_gate")
+        print(f"Method:     {method}")
         print(f"Output dir: {run_root}")
     return completed.returncode
 
@@ -199,8 +208,8 @@ def main() -> int:
     )
     run_root.mkdir(parents=True, exist_ok=True)
 
-    if method == "medcalc_semantic_gate":
-        return run_medcalc_semantic_gate(args, split, run_root)
+    if method in {"medcalc_semantic_gate", "medcalc_uncertainty_consistency_gate"}:
+        return run_medcalc_gated_method(args, split, run_root, method)
     return run_lm_eval(args, split, method, run_root)
 
 

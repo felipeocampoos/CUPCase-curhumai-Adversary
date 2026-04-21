@@ -6,6 +6,7 @@ from .domain_routed import (
     RouteDecision,
 )
 from .semantic_similarity_gated import SemanticSimilarityGatedRefiner
+from .uncertainty_consistency_gated import UncertaintyConsistencyGatedRefiner
 from .discriminative_question import DiscriminativeQuestionRefiner
 from .differential_audit import DifferentialAuditRefiner
 from .progressive_disclosure import ProgressiveDisclosureRefiner
@@ -15,6 +16,7 @@ __all__ = [
     "HeuristicDomainRouter",
     "RouteDecision",
     "SemanticSimilarityGatedRefiner",
+    "UncertaintyConsistencyGatedRefiner",
     "DiscriminativeQuestionRefiner",
     "DifferentialAuditRefiner",
     "ProgressiveDisclosureRefiner",

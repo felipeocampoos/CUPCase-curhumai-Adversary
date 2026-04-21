@@ -41,6 +41,7 @@ VALID_METHODS = [
     "zero_shot_cot",
     "one_shot_cot",
     "medcalc_semantic_gate",
+    "medcalc_uncertainty_consistency_gate",
 ]
 
 
@@ -143,6 +144,12 @@ def parse_args() -> argparse.Namespace:
         help="Sampling temperature for candidate generations in medcalc_semantic_gate",
     )
     parser.add_argument(
+        "--verifier-risk-threshold",
+        type=float,
+        default=0.5,
+        help="Risk threshold used by medcalc_uncertainty_consistency_gate",
+    )
+    parser.add_argument(
         "--max-tokens",
         type=int,
         default=192,
@@ -203,6 +210,30 @@ def extract_answer_segment(text: str) -> str:
         return conversational_match.group(1).strip()
     first_line = stripped.splitlines()[0].strip() if stripped else ""
     return first_line or stripped
+
+
+UNCERTAINTY_HEDGE_PATTERNS = (
+    r"\buncertain\b",
+    r"\bunsure\b",
+    r"\bnot sure\b",
+    r"\bnot certain\b",
+    r"\bcannot determine\b",
+    r"\bcan'?t determine\b",
+    r"\binsufficient information\b",
+    r"\binsufficient data\b",
+    r"\bneed more (?:information|data)\b",
+    r"\bmay be\b",
+    r"\bmight be\b",
+    r"\bpossible(?:ly)?\b",
+)
+
+
+@dataclass
+class VerifierResult:
+    label: str
+    risk_score: float
+    rationale: str
+    signal_triggered: bool
 
 
 def extract_answer_numeric(text: str) -> Optional[Decimal]:
@@ -343,7 +374,11 @@ def build_prompt(
             "Reasoning:\n"
         )
 
-    if method in {"zero_shot_cot", "medcalc_semantic_gate"}:
+    if method in {
+        "zero_shot_cot",
+        "medcalc_semantic_gate",
+        "medcalc_uncertainty_consistency_gate",
+    }:
         return f"{instruction}\n\n{case_block}\n\nReasoning:\n"
 
     return f"{instruction}\n\n{case_block}\n\nFinal answer:"
@@ -576,6 +611,140 @@ def choose_consensus_candidate(candidates: Sequence[ParsedCandidate]) -> Optiona
     return None
 
 
+def candidate_agreement_signal(candidates: Sequence[ParsedCandidate]) -> bool:
+    if len(candidates) < 2:
+        return False
+    counts = build_candidate_counter(candidates)
+    if not counts:
+        return True
+    top_prediction, top_count = counts.most_common(1)[0]
+    if top_count < 2:
+        return True
+    if any(not candidate.normalized_prediction for candidate in candidates):
+        return True
+    non_empty = [candidate.normalized_prediction for candidate in candidates if candidate.normalized_prediction]
+    return any(prediction != top_prediction for prediction in non_empty)
+
+
+def has_uncertainty_signal(raw_prediction: str) -> bool:
+    stripped = str(raw_prediction).strip()
+    if not stripped:
+        return True
+    if not re.search(r"(?im)^\s*final answer\s*[:=-]", stripped):
+        return True
+    answer_portion = str(extract_answer_segment(stripped)).lower()
+    return any(re.search(pattern, answer_portion) for pattern in UNCERTAINTY_HEDGE_PATTERNS)
+
+
+def build_verifier_prompt(
+    *,
+    case_text: str,
+    question: str,
+    relevant_entities: str,
+    proposed_answer: str,
+    max_case_words: int,
+) -> str:
+    case_block = format_case_block(
+        case_text=case_text,
+        question=question,
+        relevant_entities=relevant_entities,
+        max_case_words=max_case_words,
+    )
+    return (
+        "You are verifying whether a proposed answer to a medical calculator question is supported "
+        "by the patient note.\n"
+        "Respond in exactly three lines:\n"
+        "Label: supported|unsupported|insufficient_information\n"
+        "Risk: <number between 0 and 1>\n"
+        "Rationale: <one short sentence>\n\n"
+        f"{case_block}\n\n"
+        f"Proposed answer:\n{proposed_answer}"
+    )
+
+
+def parse_verifier_output(raw_output: str, risk_threshold: float) -> VerifierResult:
+    stripped = str(raw_output).strip()
+    label_match = re.search(
+        r"(?im)^\s*label\s*:\s*(supported|unsupported|insufficient_information)\b",
+        stripped,
+    )
+    risk_match = re.search(r"(?im)^\s*risk\s*:\s*([01](?:\.\d+)?)\b", stripped)
+    rationale_match = re.search(r"(?im)^\s*rationale\s*:\s*(.+)$", stripped)
+
+    label = label_match.group(1).lower() if label_match else ""
+    if not label:
+        lowered = stripped.lower()
+        if "unsupported" in lowered:
+            label = "unsupported"
+        elif "insufficient_information" in lowered or "insufficient information" in lowered:
+            label = "insufficient_information"
+        elif "supported" in lowered:
+            label = "supported"
+        else:
+            label = "insufficient_information"
+
+    risk_score = 1.0
+    if risk_match:
+        try:
+            risk_score = max(0.0, min(1.0, float(risk_match.group(1))))
+        except ValueError:
+            risk_score = 1.0
+    else:
+        if label == "supported":
+            risk_score = 0.0
+        elif label == "unsupported":
+            risk_score = 1.0
+        else:
+            risk_score = 0.75
+
+    rationale = rationale_match.group(1).strip() if rationale_match else stripped.splitlines()[0].strip()
+    signal_triggered = label != "supported" or risk_score >= risk_threshold
+    return VerifierResult(
+        label=label,
+        risk_score=risk_score,
+        rationale=rationale,
+        signal_triggered=signal_triggered,
+    )
+
+
+def build_guided_retry_prompt(
+    *,
+    case_text: str,
+    question: str,
+    output_type: str,
+    relevant_entities: str,
+    max_case_words: int,
+    baseline_answer: str,
+    verifier_result: Optional[VerifierResult],
+    candidates: Sequence[ParsedCandidate],
+) -> str:
+    case_block = format_case_block(
+        case_text=case_text,
+        question=question,
+        relevant_entities=relevant_entities,
+        max_case_words=max_case_words,
+    )
+    candidate_summary = ", ".join(
+        candidate.normalized_prediction for candidate in candidates if candidate.normalized_prediction
+    ) or "No stable parsed candidates."
+    verifier_summary = (
+        f"Verifier label: {verifier_result.label}. Risk: {verifier_result.risk_score:.2f}. "
+        f"Rationale: {verifier_result.rationale}"
+        if verifier_result is not None
+        else "Verifier feedback unavailable."
+    )
+    instruction = build_base_instruction("zero_shot_cot", output_type)
+    return (
+        f"{instruction}\n\n"
+        f"{case_block}\n\n"
+        "Revise the answer carefully using the verifier feedback and candidate disagreement summary.\n"
+        f"Current draft:\n{baseline_answer}\n\n"
+        f"Candidate summary:\n{candidate_summary}\n\n"
+        f"{verifier_summary}\n\n"
+        "Reasoning:\n"
+    )
+
+
 def build_adjudication_prompt(
     *,
     case_text: str,
@@ -604,6 +773,51 @@ def build_adjudication_prompt(
         f"{instruction}\n\n"
         f"{case_block}\n\n"
         f"Candidate answers:\n{candidate_block}\n\n"
+        "Final answer:"
+    )
+
+
+def build_uncertainty_adjudication_prompt(
+    *,
+    case_text: str,
+    question: str,
+    output_type: str,
+    relevant_entities: str,
+    max_case_words: int,
+    baseline_answer: str,
+    candidates: Sequence[ParsedCandidate],
+    verifier_result: Optional[VerifierResult],
+    uncertainty_triggered: bool,
+) -> str:
+    case_block = format_case_block(
+        case_text=case_text,
+        question=question,
+        relevant_entities=relevant_entities,
+        max_case_words=max_case_words,
+    )
+    candidate_lines = []
+    for index, candidate in enumerate(candidates, start=1):
+        candidate_lines.append(f"Candidate {index}: {candidate.raw_prediction}")
+        candidate_lines.append(
+            f"Parsed answer {index}: {candidate.normalized_prediction or '[unparsed]'}"
+        )
+    verifier_block = (
+        f"Verifier label: {verifier_result.label}\n"
+        f"Verifier risk: {verifier_result.risk_score:.2f}\n"
+        f"Verifier rationale: {verifier_result.rationale}"
+        if verifier_result is not None
+        else "Verifier feedback unavailable."
+    )
+    instruction = build_base_instruction("direct", output_type)
+    return (
+        "You are adjudicating a medical calculator answer after multiple instability signals fired.\n"
+        "Choose the single best final answer grounded only in the case facts.\n"
+        f"{instruction}\n\n"
+        f"{case_block}\n\n"
+        f"Baseline answer:\n{baseline_answer}\n\n"
+        f"Candidate answers:\n{chr(10).join(candidate_lines)}\n\n"
+        f"{verifier_block}\n\n"
+        f"Uncertainty triggered: {'yes' if uncertainty_triggered else 'no'}\n\n"
         "Final answer:"
     )
 
@@ -637,7 +851,10 @@ def execute_method(
         icl_example=icl_example,
     )
 
-    if args.method != "medcalc_semantic_gate":
+    if args.method not in {
+        "medcalc_semantic_gate",
+        "medcalc_uncertainty_consistency_gate",
+    }:
         raw_prediction = call_model(
             client=client,
             model=model,
@@ -656,9 +873,18 @@ def execute_method(
                 "icl_example_id": icl_example["id"] if icl_example else "",
                 "gate_triggered": False,
                 "adjudication_invoked": False,
+                "retry_invoked": False,
                 "selection_source": "single_pass",
                 "candidate_predictions": "[]",
                 "candidate_raw_predictions": "[]",
+                "agreement_signal_triggered": False,
+                "uncertainty_signal_triggered": False,
+                "verifier_signal_triggered": False,
+                "verifier_label": "",
+                "verifier_rationale": "",
+                "verifier_risk_score": "",
+                "signal_count": 0,
+                "escalation_tier": "stable",
             },
         )
 
@@ -687,12 +913,21 @@ def execute_method(
             ensure_ascii=True,
         ),
     }
-    if consensus is not None:
+    if args.method == "medcalc_semantic_gate" and consensus is not None:
         metadata.update(
             {
                 "gate_triggered": False,
                 "adjudication_invoked": False,
+                "retry_invoked": False,
                 "selection_source": "candidate_consensus",
+                "agreement_signal_triggered": False,
+                "uncertainty_signal_triggered": False,
+                "verifier_signal_triggered": False,
+                "verifier_label": "",
+                "verifier_rationale": "",
+                "verifier_risk_score": "",
+                "signal_count": 0,
+                "escalation_tier": "stable",
             }
         )
         return MethodExecutionResult(
@@ -702,37 +937,290 @@ def execute_method(
             metadata=metadata,
         )
 
-    adjudication_prompt = build_adjudication_prompt(
-        case_text=str(row["case_text"]),
-        question=str(row["question"]),
-        output_type=str(row["output_type"]),
-        relevant_entities=str(row.get("relevant_entities", "")),
-        max_case_words=args.max_case_words,
-        candidates=candidates,
-    )
-    raw_prediction = call_model(
+    if args.method == "medcalc_semantic_gate":
+        adjudication_prompt = build_adjudication_prompt(
+            case_text=str(row["case_text"]),
+            question=str(row["question"]),
+            output_type=str(row["output_type"]),
+            relevant_entities=str(row.get("relevant_entities", "")),
+            max_case_words=args.max_case_words,
+            candidates=candidates,
+        )
+        raw_prediction = call_model(
+            client=client,
+            model=model,
+            prompt=adjudication_prompt,
+            retry_attempts=args.retry_attempts,
+            retry_delay=args.retry_delay,
+            temperature=0.0,
+            max_tokens=args.max_tokens,
+        )
+        parsed = parse_candidate_prediction(raw_prediction, str(row["output_type"]))
+        metadata.update(
+            {
+                "gate_triggered": True,
+                "adjudication_invoked": True,
+                "retry_invoked": False,
+                "selection_source": "adjudication",
+                "agreement_signal_triggered": True,
+                "uncertainty_signal_triggered": False,
+                "verifier_signal_triggered": False,
+                "verifier_label": "",
+                "verifier_rationale": "",
+                "verifier_risk_score": "",
+                "signal_count": 1,
+                "escalation_tier": "adjudication",
+            }
+        )
+        return MethodExecutionResult(
+            raw_prediction=raw_prediction,
+            parsed_prediction=parsed.parsed_prediction,
+            normalized_prediction=parsed.normalized_prediction,
+            metadata=metadata,
+        )
+
+    baseline_raw_prediction = call_model(
         client=client,
         model=model,
-        prompt=adjudication_prompt,
+        prompt=prompt,
         retry_attempts=args.retry_attempts,
         retry_delay=args.retry_delay,
         temperature=0.0,
         max_tokens=args.max_tokens,
     )
-    parsed = parse_candidate_prediction(raw_prediction, str(row["output_type"]))
+    baseline_parsed = parse_candidate_prediction(
+        baseline_raw_prediction,
+        str(row["output_type"]),
+    )
+    agreement_triggered = candidate_agreement_signal(candidates)
+    uncertainty_triggered = has_uncertainty_signal(baseline_raw_prediction)
+
+    verifier_result: Optional[VerifierResult] = None
+    verifier_error = ""
+    try:
+        verifier_prompt = build_verifier_prompt(
+            case_text=str(row["case_text"]),
+            question=str(row["question"]),
+            relevant_entities=str(row.get("relevant_entities", "")),
+            proposed_answer=baseline_raw_prediction,
+            max_case_words=args.max_case_words,
+        )
+        verifier_raw = call_model(
+            client=client,
+            model=model,
+            prompt=verifier_prompt,
+            retry_attempts=args.retry_attempts,
+            retry_delay=args.retry_delay,
+            temperature=0.0,
+            max_tokens=max(96, min(args.max_tokens, 160)),
+        )
+        verifier_result = parse_verifier_output(verifier_raw, args.verifier_risk_threshold)
+    except Exception as exc:  # pragma: no cover - network/model behavior
+        verifier_error = str(exc)
+        verifier_result = VerifierResult(
+            label="insufficient_information",
+            risk_score=1.0,
+            rationale=f"verifier_error: {exc}",
+            signal_triggered=True,
+        )
+
+    signal_count = sum(
+        int(flag)
+        for flag in (
+            agreement_triggered,
+            uncertainty_triggered,
+            verifier_result.signal_triggered if verifier_result is not None else True,
+        )
+    )
     metadata.update(
         {
-            "gate_triggered": True,
-            "adjudication_invoked": True,
-            "selection_source": "adjudication",
+            "agreement_signal_triggered": agreement_triggered,
+            "uncertainty_signal_triggered": uncertainty_triggered,
+            "verifier_signal_triggered": (
+                verifier_result.signal_triggered if verifier_result is not None else True
+            ),
+            "verifier_label": verifier_result.label if verifier_result is not None else "",
+            "verifier_rationale": verifier_result.rationale if verifier_result is not None else "",
+            "verifier_risk_score": (
+                f"{verifier_result.risk_score:.2f}" if verifier_result is not None else ""
+            ),
+            "signal_count": signal_count,
         }
     )
-    return MethodExecutionResult(
-        raw_prediction=raw_prediction,
-        parsed_prediction=parsed.parsed_prediction,
-        normalized_prediction=parsed.normalized_prediction,
-        metadata=metadata,
+    if verifier_error:
+        metadata["verifier_error"] = verifier_error
+
+    if signal_count == 0:
+        metadata.update(
+            {
+                "gate_triggered": False,
+                "adjudication_invoked": False,
+                "retry_invoked": False,
+                "selection_source": "baseline_generator",
+                "escalation_tier": "stable",
+            }
+        )
+        return MethodExecutionResult(
+            raw_prediction=baseline_raw_prediction,
+            parsed_prediction=baseline_parsed.parsed_prediction,
+            normalized_prediction=baseline_parsed.normalized_prediction,
+            metadata=metadata,
+        )
+
+    high_instability = (
+        signal_count >= 2
+        or (
+            verifier_result is not None
+            and verifier_result.label in {"unsupported", "insufficient_information"}
+        )
     )
+    if not high_instability:
+        retry_prompt = build_guided_retry_prompt(
+            case_text=str(row["case_text"]),
+            question=str(row["question"]),
+            output_type=str(row["output_type"]),
+            relevant_entities=str(row.get("relevant_entities", "")),
+            max_case_words=args.max_case_words,
+            baseline_answer=baseline_raw_prediction,
+            verifier_result=verifier_result,
+            candidates=candidates,
+        )
+        try:
+            retry_raw_prediction = call_model(
+                client=client,
+                model=model,
+                prompt=retry_prompt,
+                retry_attempts=args.retry_attempts,
+                retry_delay=args.retry_delay,
+                temperature=0.0,
+                max_tokens=args.max_tokens,
+            )
+            retry_parsed = parse_candidate_prediction(retry_raw_prediction, str(row["output_type"]))
+            metadata.update(
+                {
+                    "gate_triggered": True,
+                    "adjudication_invoked": False,
+                    "retry_invoked": True,
+                    "selection_source": "guided_retry",
+                    "escalation_tier": "guided_retry",
+                }
+            )
+            return MethodExecutionResult(
+                raw_prediction=retry_raw_prediction,
+                parsed_prediction=retry_parsed.parsed_prediction,
+                normalized_prediction=retry_parsed.normalized_prediction,
+                metadata=metadata,
+            )
+        except Exception as exc:  # pragma: no cover - network/model behavior
+            metadata["guided_retry_error"] = str(exc)
+            metadata.update(
+                {
+                    "gate_triggered": True,
+                    "adjudication_invoked": False,
+                    "retry_invoked": True,
+                    "selection_source": "baseline_fallback_guided_retry_error",
+                    "escalation_tier": "guided_retry",
+                }
+            )
+            return MethodExecutionResult(
+                raw_prediction=baseline_raw_prediction,
+                parsed_prediction=baseline_parsed.parsed_prediction,
+                normalized_prediction=baseline_parsed.normalized_prediction,
+                metadata=metadata,
+            )
+
+    adjudication_prompt = build_uncertainty_adjudication_prompt(
+        case_text=str(row["case_text"]),
+        question=str(row["question"]),
+        output_type=str(row["output_type"]),
+        relevant_entities=str(row.get("relevant_entities", "")),
+        max_case_words=args.max_case_words,
+        baseline_answer=baseline_raw_prediction,
+        candidates=candidates,
+        verifier_result=verifier_result,
+        uncertainty_triggered=uncertainty_triggered,
+    )
+    try:
+        raw_prediction = call_model(
+            client=client,
+            model=model,
+            prompt=adjudication_prompt,
+            retry_attempts=args.retry_attempts,
+            retry_delay=args.retry_delay,
+            temperature=0.0,
+            max_tokens=args.max_tokens,
+        )
+        parsed = parse_candidate_prediction(raw_prediction, str(row["output_type"]))
+        metadata.update(
+            {
+                "gate_triggered": True,
+                "adjudication_invoked": True,
+                "retry_invoked": False,
+                "selection_source": "adjudication",
+                "escalation_tier": "adjudication",
+            }
+        )
+        return MethodExecutionResult(
+            raw_prediction=raw_prediction,
+            parsed_prediction=parsed.parsed_prediction,
+            normalized_prediction=parsed.normalized_prediction,
+            metadata=metadata,
+        )
+    except Exception as exc:  # pragma: no cover - network/model behavior
+        metadata["adjudication_error"] = str(exc)
+        retry_prompt = build_guided_retry_prompt(
+            case_text=str(row["case_text"]),
+            question=str(row["question"]),
+            output_type=str(row["output_type"]),
+            relevant_entities=str(row.get("relevant_entities", "")),
+            max_case_words=args.max_case_words,
+            baseline_answer=baseline_raw_prediction,
+            verifier_result=verifier_result,
+            candidates=candidates,
+        )
+        try:
+            retry_raw_prediction = call_model(
+                client=client,
+                model=model,
+                prompt=retry_prompt,
+                retry_attempts=args.retry_attempts,
+                retry_delay=args.retry_delay,
+                temperature=0.0,
+                max_tokens=args.max_tokens,
+            )
+            retry_parsed = parse_candidate_prediction(retry_raw_prediction, str(row["output_type"]))
+            metadata.update(
+                {
+                    "gate_triggered": True,
+                    "adjudication_invoked": True,
+                    "retry_invoked": True,
+                    "selection_source": "guided_retry_fallback_after_adjudication_error",
+                    "escalation_tier": "adjudication",
+                }
+            )
+            return MethodExecutionResult(
+                raw_prediction=retry_raw_prediction,
+                parsed_prediction=retry_parsed.parsed_prediction,
+                normalized_prediction=retry_parsed.normalized_prediction,
+                metadata=metadata,
+            )
+        except Exception as retry_exc:  # pragma: no cover - network/model behavior
+            metadata["guided_retry_error"] = str(retry_exc)
+            metadata.update(
+                {
+                    "gate_triggered": True,
+                    "adjudication_invoked": True,
+                    "retry_invoked": True,
+                    "selection_source": "baseline_fallback_adjudication_and_retry_error",
+                    "escalation_tier": "adjudication",
+                }
+            )
+            return MethodExecutionResult(
+                raw_prediction=baseline_raw_prediction,
+                parsed_prediction=baseline_parsed.parsed_prediction,
+                normalized_prediction=baseline_parsed.normalized_prediction,
+                metadata=metadata,
+            )
 
 
 def main() -> int:

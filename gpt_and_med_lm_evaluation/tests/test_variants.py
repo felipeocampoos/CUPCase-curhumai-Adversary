@@ -19,6 +19,9 @@ from refinement.variants.domain_routed import (
     HeuristicDomainRouter,
 )
 from refinement.variants.semantic_similarity_gated import SemanticSimilarityGatedRefiner
+from refinement.variants.uncertainty_consistency_gated import (
+    UncertaintyConsistencyGatedRefiner,
+)
 from refinement.variants.discriminative_question import DiscriminativeQuestionRefiner
 from refinement.variants.differential_audit import DifferentialAuditRefiner
 from refinement.variants.progressive_disclosure import ProgressiveDisclosureRefiner
@@ -110,6 +113,7 @@ def test_list_refiner_variants_contains_expected_entries():
     assert "baseline" in variants
     assert "domain_routed" in variants
     assert "semantic_similarity_gated" in variants
+    assert "uncertainty_consistency_gated" in variants
     assert "discriminative_question" in variants
     assert "differential_audit" in variants
     assert "progressive_disclosure" in variants
@@ -131,6 +135,15 @@ def test_create_refiner_variant_semantic_similarity_gated():
         config=RefinerConfig(),
     )
     assert isinstance(refiner, SemanticSimilarityGatedRefiner)
+
+
+def test_create_refiner_variant_uncertainty_consistency_gated():
+    refiner = create_refiner_variant(
+        variant="uncertainty_consistency_gated",
+        api_key="test-key",
+        config=RefinerConfig(),
+    )
+    assert isinstance(refiner, UncertaintyConsistencyGatedRefiner)
 
 
 def test_create_refiner_variant_discriminative_question():

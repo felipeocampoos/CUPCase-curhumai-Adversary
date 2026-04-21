@@ -197,6 +197,7 @@ class RefinerConfig:
     api_delay: float = 1.0
     temperature: float = 0.0
     similarity_threshold: float = 0.65
+    confidence_margin_threshold: float = 0.15
     disclosure_fraction: float = 0.2
     early_confidence_threshold: float = 0.8
     revision_instability_threshold: float = 0.5
@@ -217,6 +218,7 @@ class RefinerConfig:
             "api_delay": self.api_delay,
             "temperature": self.temperature,
             "similarity_threshold": self.similarity_threshold,
+            "confidence_margin_threshold": self.confidence_margin_threshold,
             "disclosure_fraction": self.disclosure_fraction,
             "early_confidence_threshold": self.early_confidence_threshold,
             "revision_instability_threshold": self.revision_instability_threshold,

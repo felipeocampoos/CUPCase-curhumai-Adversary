@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 
 MODULE_DIR = Path(__file__).resolve().parents[1]
@@ -10,10 +11,14 @@ from prepare_hf_medcalc_bench import build_default_output_path, convert_rows, ma
 from run_medcalc_bench_free_text import (
     build_prompt,
     build_results_dir,
+    candidate_agreement_signal,
     choose_consensus_candidate,
+    execute_method,
     extract_answer_segment,
     extract_answer_numeric,
+    has_uncertainty_signal,
     parse_candidate_prediction,
+    parse_verifier_output,
     score_prediction,
     select_icl_example,
 )
@@ -185,3 +190,196 @@ def test_choose_consensus_candidate_returns_majority_numeric_answer():
     consensus = choose_consensus_candidate(candidates)
     assert consensus is not None
     assert consensus.normalized_prediction == "75"
+
+
+def test_candidate_agreement_signal_triggers_on_disagreement():
+    candidates = [
+        parse_candidate_prediction("Final answer: 75", "decimal"),
+        parse_candidate_prediction("Final answer: 80", "decimal"),
+        parse_candidate_prediction("Final answer: 75", "decimal"),
+    ]
+
+    assert candidate_agreement_signal(candidates) is True
+
+
+def test_has_uncertainty_signal_detects_hedge_and_missing_final_answer():
+    assert has_uncertainty_signal("I am not sure, maybe 75") is True
+    assert has_uncertainty_signal("Final answer: 75") is False
+
+
+def test_has_uncertainty_signal_ignores_likely_in_reasoning_when_final_answer_is_stable():
+    assert (
+        has_uncertainty_signal("This likely reflects the expected value.\nFinal answer: 75")
+        is False
+    )
+
+
+def test_parse_verifier_output_handles_structured_response():
+    result = parse_verifier_output(
+        "Label: supported\nRisk: 0.20\nRationale: The note supports the value.",
+        0.5,
+    )
+
+    assert result.label == "supported"
+    assert result.signal_triggered is False
+    assert result.risk_score == 0.2
+
+
+def test_execute_method_uncertainty_gate_uses_guided_retry(monkeypatch):
+    call_prompts = []
+    responses = iter(
+        [
+            "Final answer: 75",
+            "Final answer: 75",
+            "Final answer: 75",
+            "Maybe 75",
+            "Label: supported\nRisk: 0.00\nRationale: Supported by the note.",
+            "Final answer: 75",
+        ]
+    )
+
+    def fake_call_model(**kwargs):
+        call_prompts.append(kwargs["prompt"])
+        return next(responses)
+
+    monkeypatch.setattr("run_medcalc_bench_free_text.call_model", fake_call_model)
+
+    args = SimpleNamespace(
+        method="medcalc_uncertainty_consistency_gate",
+        max_case_words=250,
+        retry_attempts=1,
+        retry_delay=0,
+        num_candidates=3,
+        candidate_temperature=0.7,
+        max_tokens=128,
+        verifier_risk_threshold=0.5,
+        icl_example_id=None,
+        icl_seed=42,
+    )
+    row = {
+        "id": "demo-1",
+        "case_text": "Patient note text",
+        "question": "What is the value?",
+        "output_type": "decimal",
+        "relevant_entities": "",
+    }
+
+    result = execute_method(
+        client=object(),
+        model="demo",
+        row=row,
+        args=args,
+        icl_examples=None,
+    )
+
+    assert result.raw_prediction == "Final answer: 75"
+    assert result.metadata["selection_source"] == "guided_retry"
+    assert result.metadata["retry_invoked"] is True
+    assert result.metadata["adjudication_invoked"] is False
+    assert result.metadata["signal_count"] == 1
+    assert "Revise the answer carefully" in call_prompts[-1]
+
+
+def test_execute_method_uncertainty_gate_uses_adjudication(monkeypatch):
+    responses = iter(
+        [
+            "Final answer: 75",
+            "Final answer: 80",
+            "Final answer: 90",
+            "Final answer: 75",
+            "Label: unsupported\nRisk: 0.90\nRationale: Candidate values conflict.",
+            "Final answer: 80",
+        ]
+    )
+
+    monkeypatch.setattr(
+        "run_medcalc_bench_free_text.call_model",
+        lambda **kwargs: next(responses),
+    )
+
+    args = SimpleNamespace(
+        method="medcalc_uncertainty_consistency_gate",
+        max_case_words=250,
+        retry_attempts=1,
+        retry_delay=0,
+        num_candidates=3,
+        candidate_temperature=0.7,
+        max_tokens=128,
+        verifier_risk_threshold=0.5,
+        icl_example_id=None,
+        icl_seed=42,
+    )
+    row = {
+        "id": "demo-2",
+        "case_text": "Patient note text",
+        "question": "What is the value?",
+        "output_type": "decimal",
+        "relevant_entities": "",
+    }
+
+    result = execute_method(
+        client=object(),
+        model="demo",
+        row=row,
+        args=args,
+        icl_examples=None,
+    )
+
+    assert result.raw_prediction == "Final answer: 80"
+    assert result.metadata["selection_source"] == "adjudication"
+    assert result.metadata["adjudication_invoked"] is True
+    assert result.metadata["signal_count"] >= 2
+
+
+def test_execute_method_uncertainty_gate_stable_path_keeps_verified_baseline(monkeypatch):
+    responses = iter(
+        [
+            "Final answer: 80",
+            "Final answer: 80",
+            "Final answer: 80",
+            "Final answer: 75",
+            "Label: supported\nRisk: 0.00\nRationale: Supported by the note.",
+        ]
+    )
+
+    monkeypatch.setattr(
+        "run_medcalc_bench_free_text.call_model",
+        lambda **kwargs: next(responses),
+    )
+
+    args = SimpleNamespace(
+        method="medcalc_uncertainty_consistency_gate",
+        max_case_words=250,
+        retry_attempts=1,
+        retry_delay=0,
+        num_candidates=3,
+        candidate_temperature=0.7,
+        max_tokens=128,
+        verifier_risk_threshold=0.5,
+        icl_example_id=None,
+        icl_seed=42,
+    )
+    row = {
+        "id": "demo-3",
+        "case_text": "Patient note text",
+        "question": "What is the value?",
+        "output_type": "decimal",
+        "relevant_entities": "",
+    }
+
+    result = execute_method(
+        client=object(),
+        model="demo",
+        row=row,
+        args=args,
+        icl_examples=None,
+    )
+
+    assert result.raw_prediction == "Final answer: 75"
+    assert result.metadata["selection_source"] == "baseline_generator"
+    assert result.metadata["gate_triggered"] is False
+
+
+def test_candidate_agreement_signal_is_neutral_for_single_candidate():
+    candidate = parse_candidate_prediction("Final answer: 75", "decimal")
+    assert candidate_agreement_signal([candidate]) is False
