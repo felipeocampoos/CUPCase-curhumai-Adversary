@@ -109,6 +109,12 @@ def parse_args():
         help="Cosine similarity threshold for semantic_similarity_gated variant",
     )
     parser.add_argument(
+        "--confidence-margin-threshold",
+        type=float,
+        default=0.15,
+        help="Top1-top2 confidence margin threshold for uncertainty_consistency_gated",
+    )
+    parser.add_argument(
         "--disclosure-fraction",
         type=float,
         default=0.2,
@@ -370,6 +376,7 @@ def main():
         max_iterations=args.max_iterations,
         clinical_quality_threshold=args.clinical_threshold,
         similarity_threshold=args.similarity_threshold,
+        confidence_margin_threshold=args.confidence_margin_threshold,
         disclosure_fraction=args.disclosure_fraction,
         early_confidence_threshold=args.early_confidence_threshold,
         revision_instability_threshold=args.revision_instability_threshold,

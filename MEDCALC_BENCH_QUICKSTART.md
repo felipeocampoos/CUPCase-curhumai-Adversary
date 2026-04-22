@@ -42,14 +42,22 @@ Run the repo-owned MedCalc free-text evaluator:
 python run_medcalc_bench_free_text.py \
   --provider huggingface_local \
   --model Qwen/Qwen2.5-0.5B-Instruct \
+  --method medcalc_semantic_gate \
   --split test \
   --sample-size 25
 ```
 
+Supported API-side methods:
+
+- `direct`
+- `zero_shot_cot`
+- `one_shot_cot`
+- `medcalc_semantic_gate`
+
 Artifacts land under:
 
 ```text
-gpt_and_med_lm_evaluation/output/experiments/medcalc_bench/<split>/<provider>/free_text/<model_slug>/<sample_label>/
+gpt_and_med_lm_evaluation/output/experiments/medcalc_bench/<split>/<provider>/free_text/<method>/<model_slug>/<sample_label>/
 ```
 
 Expected files in that directory:
@@ -58,10 +66,15 @@ Expected files in that directory:
 - `summary_report_<timestamp>.json`: aggregate metrics such as accuracy and parse rate
 - `run_manifest_<timestamp>.json`: provenance and config for the run
 
+`one_shot_cot` supports:
+
+- `--icl-example-id <id>` to pin a demonstration
+- `--icl-seed <seed>` for deterministic selection from the dataset `one_shot` split
+
 Smoke test:
 
 ```bash
-python medcalc_bench_smoke.py --keep-output
+python medcalc_bench_smoke.py --method medcalc_semantic_gate --keep-output
 ```
 
 ## 3) `lm_eval` Harness
@@ -78,6 +91,7 @@ Run the repo-owned task:
 python scripts/run_medcalc_bench.py \
   --model hf \
   --model-args pretrained=BioMistral/BioMistral-7B-DARE \
+  --method zero_shot_cot \
   --split test \
   --sample-size 50 \
   --device cuda:0 \
@@ -87,13 +101,13 @@ python scripts/run_medcalc_bench.py \
 Outputs land under:
 
 ```text
-lm_eval_evaluation/output/medcalc_bench/<split>/<model_slug>/<timestamp>/
+lm_eval_evaluation/output/medcalc_bench/<split>/<method>/<model_slug>/<timestamp>/
 ```
 
-The harness writes the aggregate metrics JSON one level below that timestamped directory, under the internal model slug directory, for example:
+For `direct`, `zero_shot_cot`, and `one_shot_cot`, the harness writes the aggregate metrics JSON one level below that timestamped directory, under the internal model slug directory, for example:
 
 ```text
-lm_eval_evaluation/output/medcalc_bench/test/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/sshleifer__tiny-gpt2/results_<timestamp>.json
+lm_eval_evaluation/output/medcalc_bench/test/direct/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/sshleifer__tiny-gpt2/results_<timestamp>.json
 ```
 
 Expected files from `lm_eval`:
@@ -101,13 +115,20 @@ Expected files from `lm_eval`:
 - `results_<timestamp>.json`: aggregate benchmark metrics
 - `samples_med_calc_bench_<timestamp>.jsonl`: per-sample generations when `--log-samples` is enabled
 
+For `medcalc_semantic_gate`, the wrapper uses the repo-owned MedCalc local-model runner because the method needs multi-candidate generation plus adjudication. Those artifacts are written under the wrapper run root, for example:
+
+```text
+lm_eval_evaluation/output/medcalc_bench/test/medcalc_semantic_gate/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/test/huggingface_local/free_text/medcalc_semantic_gate/sshleifer_tiny-gpt2/n1_seed42/results.csv
+```
+
 Smoke test:
 
 ```bash
-python scripts/medcalc_bench_smoke.py --keep-output
+python scripts/medcalc_bench_smoke.py --method one_shot_cot --keep-output
 ```
 
 Notes:
 
 - The repo-tested smoke command uses `sshleifer/tiny-gpt2` on `cpu` for portability.
 - The `dummy` model is not suitable for this task because `med_calc_bench` uses `generate_until`.
+- The gated method currently requires `--model hf --model-args pretrained=<hf-model>` on this local-model surface.

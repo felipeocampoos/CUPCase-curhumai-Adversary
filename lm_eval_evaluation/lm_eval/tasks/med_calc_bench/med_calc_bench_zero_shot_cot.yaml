@@ -1,0 +1,9 @@
+group: med_calc_bench
+task: med_calc_bench_zero_shot_cot
+task_alias: med_calc_bench_zero_shot_cot
+include: _default_template_yaml
+doc_to_text: !function utils.doc_to_text_zero_shot_cot
+generation_kwargs:
+  until: []
+  do_sample: false
+  temperature: 0

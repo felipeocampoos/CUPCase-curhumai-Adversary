@@ -288,6 +288,7 @@ Available variants:
 - `baseline`: Original Generator -> Critic -> Editor loop
 - `domain_routed`: Domain Routed Prompt Specialization (implemented idea #5)
 - `semantic_similarity_gated`: Semantic Similarity Gated Differential Reasoning (implemented idea #2)
+- `uncertainty_consistency_gated`: Multi-signal adaptive gating with candidate agreement, self-uncertainty, and critic verification
 - `discriminative_question`: Self Generated Discriminative Questions with Answer Integration (implemented idea #4)
 - `progressive_disclosure`: Progressive Disclosure with Explicit Belief Revision (implemented idea #3)
 
@@ -313,6 +314,18 @@ Or use the dedicated wrapper:
 
 ```bash
 python gpt_free_text_eval_refined_semantic_similarity.py
+```
+
+Uncertainty-consistency gated variant:
+
+```bash
+python gpt_free_text_eval_refined.py --variant uncertainty_consistency_gated
+```
+
+Or use the dedicated wrapper:
+
+```bash
+python gpt_free_text_eval_refined_uncertainty_consistency.py
 ```
 
 Discriminative-question variant:
@@ -351,6 +364,7 @@ python gpt_free_text_eval_refined.py \
     --max-iterations 3 \
     --clinical-threshold 3 \
     --similarity-threshold 0.65 \
+    --confidence-margin-threshold 0.15 \
     --disclosure-fraction 0.2 \
     --early-confidence-threshold 0.8 \
     --revision-instability-threshold 0.5 \
@@ -404,6 +418,26 @@ Per-case telemetry (in `variant_metadata`) includes:
 - pairwise cosine matrix and mean cosine
 - gate trigger flag
 - discriminator rationale and differentiators
+
+### Implemented Variant: Uncertainty-Consistency Gated Reasoning
+
+`uncertainty_consistency_gated` extends the semantic-gating idea by combining:
+- semantic ambiguity in the top-3 candidates
+- low confidence margin between the top candidate and runner-up
+- self-reported uncertainty in the baseline draft
+- verifier risk from the existing structured critic
+
+Adaptive flow:
+- Stable cases return the baseline draft directly
+- Moderate instability triggers one verifier-guided retry using the existing editor path
+- High instability triggers a discriminator pass over candidates, similarity diagnostics, the baseline draft, and critic feedback
+
+Per-case telemetry (in `variant_metadata`) includes:
+- semantic gate trigger and confidence-margin trigger
+- uncertainty trigger and verifier trigger
+- verifier quality score, hard-fail flag, and failed checklist items
+- escalation tier (`stable`, `guided_retry`, `discriminator`)
+- final selection source and fallback reasons
 
 ### Implemented Variant: Self Generated Discriminative Questions with Answer Integration
 

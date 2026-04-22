@@ -20,6 +20,7 @@ try:
         ProgressiveDisclosureRefiner,
         RouteDecision,
         SemanticSimilarityGatedRefiner,
+        UncertaintyConsistencyGatedRefiner,
     )
 except ModuleNotFoundError as exc:
     if exc.name != "openai":
@@ -38,6 +39,7 @@ except ModuleNotFoundError as exc:
     ProgressiveDisclosureRefiner = None
     RouteDecision = None
     SemanticSimilarityGatedRefiner = None
+    UncertaintyConsistencyGatedRefiner = None
 from .schema import (
     DiagnosticResponse,
     ChecklistItem,
@@ -143,6 +145,7 @@ __all__ = [
     "DifferentialAuditRefiner",
     "ProgressiveDisclosureRefiner",
     "SemanticSimilarityGatedRefiner",
+    "UncertaintyConsistencyGatedRefiner",
     "HeuristicDomainRouter",
     "RouteDecision",
     "Candidate",

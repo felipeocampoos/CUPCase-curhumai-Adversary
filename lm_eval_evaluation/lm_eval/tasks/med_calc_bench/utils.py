@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+import random
 import re
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 import datasets
@@ -9,6 +12,7 @@ import pandas as pd
 
 
 NUMERIC_OUTPUT_TYPES = {"decimal", "integer"}
+DEFAULT_DATASET_ID = "nsk7153/MedCalc-Bench-Verified"
 
 
 def normalize_text(value: str) -> str:
@@ -42,34 +46,29 @@ def extract_numeric_candidates(text: str) -> List[Decimal]:
     return parsed_values
 
 
-def extract_answer_numeric(text: str) -> Optional[Decimal]:
-    answer_segments = []
+def extract_answer_segment(text: str) -> str:
+    stripped = str(text).strip()
     for pattern in (
-        r"(?is)\bfinal answer\b\s*[:=-]?\s*(.+)",
-        r"(?is)\banswer\b\s*[:=-]?\s*(.+)",
+        r"(?is)\bfinal answer\b\s*[:=-]\s*(.+)",
+        r"(?is)\banswer\b\s*[:=-]\s*(.+)",
     ):
-        match = re.search(pattern, text)
+        match = re.search(pattern, stripped)
         if match:
-            answer_segments.append(match.group(1).strip())
+            return match.group(1).strip()
+    conversational_match = re.search(r"(?is)\bthe answer is\b\s+(.+)", stripped)
+    if conversational_match:
+        return conversational_match.group(1).strip()
+    first_line = stripped.splitlines()[0].strip() if stripped else ""
+    return first_line or stripped
 
-    answer_segments.append(text.strip())
-    first_line = text.strip().splitlines()[0].strip() if text.strip() else ""
-    if first_line:
-        answer_segments.append(first_line)
 
+def extract_answer_numeric(text: str) -> Optional[Decimal]:
+    answer_segments = [extract_answer_segment(text), str(text).strip()]
     for segment in answer_segments:
         candidates = extract_numeric_candidates(segment)
         if candidates:
             return candidates[0]
-
     return None
-
-
-def extract_last_numeric(text: str) -> Optional[Decimal]:
-    matches = extract_numeric_candidates(text)
-    if not matches:
-        return None
-    return matches[-1]
 
 
 def normalize_date_like(value: str) -> str:
@@ -99,16 +98,7 @@ def process_docs(dataset: datasets.Dataset) -> datasets.Dataset:
     return dataset.map(_process_doc)
 
 
-def doc_to_text(doc: dict) -> str:
-    instruction = (
-        "Read the patient note and answer the medical calculation question. "
-        "Return only the final answer with no explanation."
-    )
-    if doc["output_type"] in NUMERIC_OUTPUT_TYPES:
-        instruction += " If the answer is numeric, return only the final numeric value."
-    elif doc["output_type"] == "date":
-        instruction += " If the answer is a date, return only the final date."
-
+def format_case_block(doc: dict) -> str:
     words = str(doc["case_text"]).split()
     truncated_case_text = " ".join(words[:250]) if len(words) > 250 else doc["case_text"]
     entities_block = (
@@ -118,11 +108,109 @@ def doc_to_text(doc: dict) -> str:
     )
 
     return (
-        f"{instruction}\n\n"
         f"{entities_block}"
         f"Patient note:\n{truncated_case_text}\n\n"
-        f"Question:\n{doc['question']}\n\n"
-        "Final answer:"
+        f"Question:\n{doc['question']}"
+    )
+
+
+def build_instruction(output_type: str, *, chain_of_thought: bool) -> str:
+    if chain_of_thought:
+        instruction = (
+            "Read the patient note and solve the medical calculation question. "
+            "Reason step by step, then end with a line starting exactly with 'Final answer:'."
+        )
+    else:
+        instruction = (
+            "Read the patient note and answer the medical calculation question. "
+            "Return only the final answer with no explanation."
+        )
+    if output_type in NUMERIC_OUTPUT_TYPES:
+        suffix = (
+            " If the answer is numeric, the final answer line must contain only the final numeric value."
+            if chain_of_thought
+            else " If the answer is numeric, return only the final numeric value."
+        )
+        instruction += suffix
+    elif output_type == "date":
+        suffix = (
+            " If the answer is a date, the final answer line must contain only the final date."
+            if chain_of_thought
+            else " If the answer is a date, return only the final date."
+        )
+        instruction += suffix
+    return instruction
+
+
+@lru_cache(maxsize=8)
+def _cached_one_shot_pool(dataset_id: str) -> List[dict]:
+    dataset = datasets.load_dataset(dataset_id, split="one_shot")
+    rows = []
+    for doc in dataset:
+        rows.append(
+            {
+                "id": f"{doc.get('Note ID', '')}:{doc.get('Row Number', '')}".strip(":"),
+                "case_text": doc["Patient Note"],
+                "question": doc["Question"],
+                "relevant_entities": doc.get("Relevant Entities", ""),
+                "ground_truth_answer": str(doc["Ground Truth Answer"]),
+                "ground_truth_explanation": doc.get("Ground Truth Explanation", ""),
+            }
+        )
+    return rows
+
+
+def select_one_shot_example(*, exclude_id: str | None = None) -> dict:
+    dataset_id = os.environ.get("MEDCALC_DATASET_ID", DEFAULT_DATASET_ID)
+    examples = _cached_one_shot_pool(dataset_id)
+    if exclude_id:
+        examples = [example for example in examples if example["id"] != exclude_id]
+    if not examples:
+        raise ValueError("No one-shot examples available after exclusion")
+    explicit_id = os.environ.get("MEDCALC_ICL_EXAMPLE_ID")
+    if explicit_id:
+        for example in examples:
+            if example["id"] == explicit_id:
+                return example
+        raise ValueError(f"Unknown or excluded MEDCALC_ICL_EXAMPLE_ID '{explicit_id}'")
+    seed = int(os.environ.get("MEDCALC_ICL_SEED", "42"))
+    rng = random.Random(seed)
+    return examples[rng.randrange(len(examples))]
+
+
+def format_one_shot_example(example: dict) -> str:
+    example_doc = dict(example)
+    example_doc["case_text"] = " ".join(str(example["case_text"]).split()[:24])
+    explanation = (
+        " ".join(str(example.get("ground_truth_explanation", "")).strip().split()[:40])
+        or "Use the relevant calculator inputs from the note and solve directly."
+    )
+    return (
+        "Worked example:\n"
+        f"{format_case_block(example_doc)}\n\n"
+        f"Reasoning:\n{explanation}\n\n"
+        f"Final answer: {str(example['ground_truth_answer']).strip()}"
+    )
+
+
+def doc_to_text(doc: dict) -> str:
+    return f"{build_instruction(doc['output_type'], chain_of_thought=False)}\n\n{format_case_block(doc)}\n\nFinal answer:"
+
+
+def doc_to_text_zero_shot_cot(doc: dict) -> str:
+    return f"{build_instruction(doc['output_type'], chain_of_thought=True)}\n\n{format_case_block(doc)}\n\nReasoning:\n"
+
+
+def doc_to_text_one_shot_cot(doc: dict) -> str:
+    example = select_one_shot_example(exclude_id=str(doc.get("id", "")) or None)
+    shortened_doc = dict(doc)
+    shortened_doc["case_text"] = " ".join(str(doc["case_text"]).split()[:120])
+    return (
+        f"{build_instruction(doc['output_type'], chain_of_thought=True)}\n\n"
+        f"{format_one_shot_example(example)}\n\n"
+        "Now solve the real case.\n\n"
+        f"{format_case_block(shortened_doc)}\n\n"
+        "Reasoning:\n"
     )
 
 
@@ -149,10 +237,12 @@ def process_results(doc: dict, results: List[str]) -> Dict[str, int]:
             return {"exact_match": int(correct)}
 
     if output_type == "date":
-        correct = normalize_date_like(raw_prediction) == normalize_date_like(
+        correct = normalize_date_like(extract_answer_segment(raw_prediction)) == normalize_date_like(
             doc["ground_truth_answer"]
         )
         return {"exact_match": int(correct)}
 
-    correct = normalize_text(raw_prediction) == normalize_text(doc["ground_truth_answer"])
+    correct = normalize_text(extract_answer_segment(raw_prediction)) == normalize_text(
+        doc["ground_truth_answer"]
+    )
     return {"exact_match": int(correct)}

@@ -1,0 +1,5 @@
+group: med_calc_bench
+task: med_calc_bench_zero_shot_cot_one_shot
+task_alias: med_calc_bench_zero_shot_cot_one_shot
+include: med_calc_bench_zero_shot_cot.yaml
+test_split: one_shot
