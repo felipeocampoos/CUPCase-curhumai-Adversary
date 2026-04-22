@@ -42,7 +42,7 @@ Run the repo-owned MedCalc free-text evaluator:
 python run_medcalc_bench_free_text.py \
   --provider huggingface_local \
   --model Qwen/Qwen2.5-0.5B-Instruct \
-  --method medcalc_semantic_gate \
+  --method medcalc_uncertainty_consistency_gate \
   --split test \
   --sample-size 25
 ```
@@ -53,6 +53,7 @@ Supported API-side methods:
 - `zero_shot_cot`
 - `one_shot_cot`
 - `medcalc_semantic_gate`
+- `medcalc_uncertainty_consistency_gate`
 
 Artifacts land under:
 
@@ -71,10 +72,16 @@ Expected files in that directory:
 - `--icl-example-id <id>` to pin a demonstration
 - `--icl-seed <seed>` for deterministic selection from the dataset `one_shot` split
 
+`medcalc_uncertainty_consistency_gate` also supports:
+
+- `--num-candidates <n>` to control the number of sampled candidate answers
+- `--candidate-temperature <float>` to control candidate diversity
+- `--verifier-risk-threshold <float>` to tune when verifier output counts as risk
+
 Smoke test:
 
 ```bash
-python medcalc_bench_smoke.py --method medcalc_semantic_gate --keep-output
+python medcalc_bench_smoke.py --method medcalc_uncertainty_consistency_gate --keep-output
 ```
 
 ## 3) `lm_eval` Harness
@@ -115,10 +122,16 @@ Expected files from `lm_eval`:
 - `results_<timestamp>.json`: aggregate benchmark metrics
 - `samples_med_calc_bench_<timestamp>.jsonl`: per-sample generations when `--log-samples` is enabled
 
-For `medcalc_semantic_gate`, the wrapper uses the repo-owned MedCalc local-model runner because the method needs multi-candidate generation plus adjudication. Those artifacts are written under the wrapper run root, for example:
+For `medcalc_semantic_gate` and `medcalc_uncertainty_consistency_gate`, the wrapper uses the repo-owned MedCalc local-model runner because these methods need multi-candidate generation and escalation logic beyond a single-pass `lm_eval` YAML task. Those artifacts are written under the wrapper run root, for example:
 
 ```text
 lm_eval_evaluation/output/medcalc_bench/test/medcalc_semantic_gate/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/test/huggingface_local/free_text/medcalc_semantic_gate/sshleifer_tiny-gpt2/n1_seed42/results.csv
+```
+
+or
+
+```text
+lm_eval_evaluation/output/medcalc_bench/test/medcalc_uncertainty_consistency_gate/hf_pretrained_sshleifer_tiny-gpt2/<timestamp>/test/huggingface_local/free_text/medcalc_uncertainty_consistency_gate/sshleifer_tiny-gpt2/n1_seed42/results.csv
 ```
 
 Smoke test:
@@ -131,4 +144,4 @@ Notes:
 
 - The repo-tested smoke command uses `sshleifer/tiny-gpt2` on `cpu` for portability.
 - The `dummy` model is not suitable for this task because `med_calc_bench` uses `generate_until`.
-- The gated method currently requires `--model hf --model-args pretrained=<hf-model>` on this local-model surface.
+- The gated methods currently require `--model hf --model-args pretrained=<hf-model>` on this local-model surface.

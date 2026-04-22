@@ -21,11 +21,12 @@ This repo-owned task evaluates models in generative mode and scores correctness 
 - `med_calc_bench_zero_shot_cot` - zero-shot chain-of-thought prompting on the dataset `test` split
 - `med_calc_bench_one_shot_cot` - one worked-example chain-of-thought prompting on the dataset `test` split
 
-The repo-owned wrapper `scripts/run_medcalc_bench.py` exposes four method names:
+The repo-owned wrapper `scripts/run_medcalc_bench.py` exposes five method names:
 
 - `direct`
 - `zero_shot_cot`
 - `one_shot_cot`
 - `medcalc_semantic_gate`
+- `medcalc_uncertainty_consistency_gate`
 
-`medcalc_semantic_gate` is implemented as a custom runner branch rather than a single-pass `lm_eval` YAML task because it requires multi-candidate generation and adjudication.
+`medcalc_semantic_gate` and `medcalc_uncertainty_consistency_gate` are implemented as custom runner branches rather than single-pass `lm_eval` YAML tasks because they require multi-candidate generation and method-specific escalation logic.
